@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+server/dist
+client/dist
+server/storage/config.json
+data/*
+!data/.gitkeep
+!data/README.md
+.env
+*.log
+.DS_Store
