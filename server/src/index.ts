@@ -358,7 +358,7 @@ app.post('/api/download', async (req, res) => {
       }
     }
 
-    res.json({ ok: true, targetRoot, exerciseRoot, exerciseName: normalizedPayload.exerciseName, events });
+    res.json({ ok: true, targetRoot: relativePath, exerciseRoot, exerciseName: normalizedPayload.exerciseName, events });
   } catch (error) {
     if (error instanceof z.ZodError) {
       res.status(400).json({ ok: false, error: error.flatten() });

@@ -189,12 +189,12 @@ function ConfigurePage() {
             <Label htmlFor="targetFolder">Absolute or relative path</Label>
             <Input
               id="targetFolder"
-              placeholder="/data/exam-variants"
+              placeholder="exam-variants"
               value={targetFolder}
               onChange={(event: ChangeEvent<HTMLInputElement>) => handleExerciseFieldChange('targetFolder', event.target.value)}
               disabled={loading !== null}
             />
-            <p className="text-xs text-muted-foreground">When you provide a relative folder, it is resolved inside the server&apos;s allowed base directory.</p>
+            <p className="text-xs text-muted-foreground">Relative paths are resolved inside /data (e.g., &quot;exam-variants&quot; → /data/exam-variants)</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="exerciseName">Exercise name</Label>
