@@ -86,7 +86,7 @@ The Vite dev server expects the API at `http://localhost:4000` unless you overri
 
 ```
 variants-comparer/
-├── client/                # React frontend
+├── client/                # React client application
 │   ├── src/
 │   │   ├── components/   # UI components (shadcn/ui)
 │   │   ├── contexts/     # React contexts
@@ -95,7 +95,7 @@ variants-comparer/
 │   │   └── types.ts      # TypeScript types
 │   ├── Dockerfile
 │   └── package.json
-├── server/               # Express API
+├── server/               # Express server API
 │   ├── src/
 │   │   └── index.ts      # Main server file
 │   ├── storage/          # Persistent config storage
@@ -219,7 +219,7 @@ All payloads share the same shape:
 
 ## Tech Stack
 
-**Frontend**
+**Client**
 - React 19
 - TypeScript
 - Vite
@@ -227,7 +227,7 @@ All payloads share the same shape:
 - shadcn/ui
 - React Router
 
-**Backend**
+**Server**
 - Node.js
 - Express
 - TypeScript
