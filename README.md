@@ -1,6 +1,10 @@
-# Exam Variants Comparer
+<div align="center">
+  <img src="client/public/logo_comparer.png" alt="Variants Comparer Logo" width="200">
+  
+  # Exam Variants Comparer
 
-A two-service setup (Express API + React + shadcn/ui client) that lets you capture three exam variants, store their repository links, download them into a structured folder tree, and keep accompanying markdown notes. Everything is dockerized with a persistent host folder for the cloned repositories.
+  A two-service setup (Express API + React + shadcn/ui client) that lets you capture three exam variants, store their repository links, download them into a structured folder tree, and keep accompanying markdown notes. Everything is dockerized with a persistent host folder for the cloned repositories.
+</div>
 
 ## Features
 - 🎨 **Modern UI**: React + Vite + shadcn/ui for a clean, responsive interface
