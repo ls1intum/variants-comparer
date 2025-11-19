@@ -2,19 +2,6 @@ import { createContext, useContext, useState, useEffect, useRef, type ReactNode 
 import { API_BASE } from '@/lib/api';
 import type { ExerciseConfig, MultiExerciseConfig } from '@/types';
 
-const createExerciseTemplate = (): ExerciseConfig => ({
-  targetFolder: 'exam-variants',
-  exerciseName: '',
-  variants: [0, 1, 2].map((idx) => ({
-    label: `Variant ${idx + 1}`,
-    testRepo: '',
-    solutionRepo: '',
-    templateRepo: '',
-    markdown: '',
-    courseLink: '',
-  })),
-});
-
 type ExerciseContextType = {
   exercises: ExerciseConfig[];
   activeExerciseIndex: number;
@@ -28,6 +15,21 @@ type ExerciseContextType = {
 };
 
 const ExerciseContext = createContext<ExerciseContextType | undefined>(undefined);
+
+function createExerciseTemplate(): ExerciseConfig {
+  return {
+    targetFolder: 'exam-variants',
+    exerciseName: '',
+    variants: [0, 1, 2].map((idx) => ({
+      label: `Variant ${idx + 1}`,
+      testRepo: '',
+      solutionRepo: '',
+      templateRepo: '',
+      markdown: '',
+      courseLink: '',
+    })),
+  };
+}
 
 export function ExerciseProvider({ children }: { children: ReactNode }) {
   const [exercises, setExercises] = useState<ExerciseConfig[]>([createExerciseTemplate()]);
@@ -128,6 +130,7 @@ export function ExerciseProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useExercise() {
   const context = useContext(ExerciseContext);
   if (context === undefined) {
