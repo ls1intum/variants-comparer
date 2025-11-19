@@ -221,7 +221,7 @@ function ConfigurePage() {
     }
   };
 
-  const fetchSuggestions = async (threshold = 30) => {
+  const fetchSuggestions = async (threshold = 50) => {
     setLoadingSuggestions(true);
     try {
       const response = await fetch(`${API_BASE}/api/suggest-mappings?threshold=${threshold}`);
@@ -430,7 +430,7 @@ function ConfigurePage() {
           {!loadingSuggestions && suggestions.length > 0 && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">Suggested Mappings (≥30% similarity)</p>
+                <p className="text-sm font-medium">Suggested Mappings (≥50% similarity)</p>
                 <Button variant="ghost" size="sm" onClick={() => setSuggestions([])}>
                   Dismiss all
                 </Button>

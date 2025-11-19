@@ -642,7 +642,7 @@ function calculateSimilarity(content1: string, content2: string): number {
 app.get('/api/suggest-mappings', async (req, res) => {
   try {
     const thresholdParam = req.query.threshold;
-    const threshold = thresholdParam ? Number(thresholdParam) : 30; // Default 30% similarity
+    const threshold = thresholdParam ? Number(thresholdParam) : 50; // Default 50% similarity
     
     const multiConfig = await readMultiExerciseConfig();
     const config = multiConfig.exercises[multiConfig.activeExerciseIndex];

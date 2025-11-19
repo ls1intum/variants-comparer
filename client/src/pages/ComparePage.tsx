@@ -46,11 +46,13 @@ function getInlineDiff(text1: string, text2: string): { left: CharSegment[]; rig
 function FileComparisonCard({ 
   fileComp, 
   baseVariant, 
-  activeVariantIndex 
+  activeVariantIndex,
+  fileMappings = []
 }: { 
   fileComp: FileComparison; 
   baseVariant: string;
   activeVariantIndex: number;
+  fileMappings?: Array<{ baseFile: string; variantFile: string; variantLabel: string }>;
 }) {
   const baseLines = fileComp.baseContent.split('\n');
   const scrollRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -58,6 +60,11 @@ function FileComparisonCard({
   
   // Only show the selected variant
   const selectedVariant = fileComp.variants[activeVariantIndex];
+  
+  // Check if this file has a mapping
+  const mapping = fileMappings.find(
+    m => m.baseFile === fileComp.relativePath && m.variantLabel === selectedVariant?.variant
+  );
   
   const handleScroll = (scrollingIndex: number) => (e: React.UIEvent<HTMLDivElement>) => {
     const scrollTop = e.currentTarget.scrollTop;
@@ -111,6 +118,16 @@ function FileComparisonCard({
     <Card className="border border-slate-300">
       <CardHeader>
         <CardTitle className="text-base font-mono">{fileComp.relativePath}</CardTitle>
+        {mapping && (
+          <CardDescription className="mt-2 flex items-center gap-2 text-xs">
+            <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
+              Mapped file
+            </span>
+            <span className="text-muted-foreground">
+              Comparing with: <span className="font-mono font-medium">{mapping.variantFile}</span>
+            </span>
+          </CardDescription>
+        )}
       </CardHeader>
       <CardContent>
         <div className="grid gap-4 lg:grid-cols-2">
@@ -437,6 +454,7 @@ function ComparePage() {
                 fileComp={fileComp} 
                 baseVariant={comparison.baseVariant}
                 activeVariantIndex={activeVariantIndex}
+                fileMappings={currentExercise.fileMappings || []}
               />
             ))}
           </div>
