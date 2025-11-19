@@ -117,17 +117,19 @@ function FileComparisonCard({
   return (
     <Card className="border border-slate-300">
       <CardHeader>
-        <CardTitle className="text-base font-mono">{fileComp.relativePath}</CardTitle>
-        {mapping && (
-          <CardDescription className="mt-2 flex items-center gap-2 text-xs">
-            <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
-              Mapped file
-            </span>
-            <span className="text-muted-foreground">
-              Comparing with: <span className="font-mono font-medium">{mapping.variantFile}</span>
-            </span>
-          </CardDescription>
-        )}
+        <div className="flex items-start justify-between gap-4">
+          <CardTitle className="text-base font-mono flex-1">{fileComp.relativePath}</CardTitle>
+          {mapping && (
+            <div className="flex items-center gap-2 text-xs shrink-0">
+              <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
+                Mapped
+              </span>
+              <span className="text-muted-foreground">
+                <span className="font-mono font-medium">{mapping.variantFile}</span>
+              </span>
+            </div>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         <div className="grid gap-4 lg:grid-cols-2">
