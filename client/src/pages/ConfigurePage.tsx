@@ -1,7 +1,7 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
 
 import { API_BASE } from '@/lib/api';
-import type { DownloadResult, VariantForm, MultiExerciseConfig } from '@/types';
+import type { DownloadResult, VariantForm, MultiExerciseConfig, FileMapping } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -29,10 +29,13 @@ function ConfigurePage() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [showProgress, setShowProgress] = useState(false);
   const [currentStep, setCurrentStep] = useState('');
+  const [availableFiles, setAvailableFiles] = useState<Record<string, { label: string; files: string[] }>>({});
+  const [loadingFiles, setLoadingFiles] = useState(false);
 
   const variants = currentExercise.variants;
   const targetFolder = currentExercise.targetFolder;
   const exerciseName = currentExercise.exerciseName;
+  const fileMappings = currentExercise.fileMappings || [];
 
   const handleVariantChange = (index: number, field: keyof VariantForm, value: string) => {
     setExercises((prev) => prev.map((ex, exIdx) => {
@@ -51,6 +54,51 @@ function ConfigurePage() {
     }));
   };
 
+  const handleAddFileMapping = () => {
+    setExercises((prev) => prev.map((ex, idx) => {
+      if (idx !== activeExerciseIndex) return ex;
+      const newMapping: FileMapping = {
+        baseFile: '',
+        variantFile: '',
+        variantLabel: variants[1]?.label || 'Variant 2',
+      };
+      return {
+        ...ex,
+        fileMappings: [...(ex.fileMappings || []), newMapping],
+      };
+    }));
+  };
+
+  const handleFileMappingChange = (mappingIndex: number, field: keyof FileMapping, value: string) => {
+    setExercises((prev) => prev.map((ex, idx) => {
+      if (idx !== activeExerciseIndex) return ex;
+      return {
+        ...ex,
+        fileMappings: (ex.fileMappings || []).map((mapping, mIdx) => {
+          if (mIdx === mappingIndex) {
+            const updated = { ...mapping, [field]: value };
+            // Reset variantFile when variant label changes
+            if (field === 'variantLabel') {
+              updated.variantFile = '';
+            }
+            return updated;
+          }
+          return mapping;
+        }),
+      };
+    }));
+  };
+
+  const handleRemoveFileMapping = (mappingIndex: number) => {
+    setExercises((prev) => prev.map((ex, idx) => {
+      if (idx !== activeExerciseIndex) return ex;
+      return {
+        ...ex,
+        fileMappings: (ex.fileMappings || []).filter((_, mIdx) => mIdx !== mappingIndex),
+      };
+    }));
+  };
+
   const buildPayload = (): MultiExerciseConfig => ({
     exercises: exercises.map(ex => ({
       targetFolder: ex.targetFolder.trim(),
@@ -63,6 +111,7 @@ function ConfigurePage() {
         markdown: variant.markdown,
         courseLink: variant.courseLink.trim(),
       })),
+      fileMappings: ex.fileMappings || [],
     })),
     activeExerciseIndex,
   });
@@ -154,6 +203,28 @@ function ConfigurePage() {
   };
 
   const isBusy = loading === 'save' || loading === 'download';
+
+  const fetchAvailableFiles = async () => {
+    setLoadingFiles(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/files`);
+      const data = await response.json();
+      if (data.ok && data.filesByVariant) {
+        setAvailableFiles(data.filesByVariant);
+      }
+    } catch (error) {
+      console.error('Failed to fetch files:', error);
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  useEffect(() => {
+    // Fetch files when results are available (after download)
+    if (results.length > 0) {
+      fetchAvailableFiles();
+    }
+  }, [results]);
 
   useEffect(() => {
     if (loading === 'download') {
@@ -277,6 +348,144 @@ function ConfigurePage() {
           </Card>
         ))}
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>File Mappings (Optional)</CardTitle>
+          <CardDescription>
+            If variants have renamed files that should be compared together, map them here. For example, if Variant 1 has &quot;SpaceBox.java&quot; 
+            and Variant 2 has &quot;VolcanicCargo.java&quot;, you can map them to compare as if they had the same name.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {loadingFiles && (
+            <p className="text-sm text-muted-foreground">Loading available files...</p>
+          )}
+          {!loadingFiles && Object.keys(availableFiles).length === 0 && (
+            <div className="rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-900">
+              <strong>Note:</strong> Download repositories first, then click &quot;Load files&quot; to see available files in the dropdowns.
+            </div>
+          )}
+          {!loadingFiles && Object.keys(availableFiles).length > 0 && (
+            <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              <strong>Files loaded:</strong> {Object.entries(availableFiles).map(([label, data]) => 
+                `${label} (${data.files.length} files)`
+              ).join(', ')}
+            </div>
+          )}
+          {fileMappings.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No file mappings configured. Click &quot;Add mapping&quot; to start.</p>
+          ) : (
+            <div className="space-y-3">
+              {fileMappings.map((mapping, idx) => {
+                const baseVariantLabel = variants[0]?.label || 'Variant 1';
+                const baseFiles = availableFiles[baseVariantLabel]?.files || [];
+                const variantFiles = availableFiles[mapping.variantLabel]?.files || [];
+                
+                return (
+                  <div key={idx} className="flex flex-col gap-3 rounded-md border border-border/70 p-4">
+                    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-[2fr_2fr_1fr_auto] items-end">
+                      <div className="space-y-1 min-w-0">
+                        <Label htmlFor={`mapping-base-${idx}`} className="text-xs font-medium">
+                          Base file ({baseVariantLabel})
+                        </Label>
+                        {baseFiles.length > 0 ? (
+                          <select
+                            id={`mapping-base-${idx}`}
+                            value={mapping.baseFile}
+                            onChange={(e: ChangeEvent<HTMLSelectElement>) => handleFileMappingChange(idx, 'baseFile', e.target.value)}
+                            className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            <option value="">Select a file...</option>
+                            {baseFiles.map((file) => (
+                              <option key={file} value={file} title={file}>
+                                {file}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <Input
+                            id={`mapping-base-${idx}`}
+                            placeholder="src/SpaceBox.java"
+                            value={mapping.baseFile}
+                            onChange={(e: ChangeEvent<HTMLInputElement>) => handleFileMappingChange(idx, 'baseFile', e.target.value)}
+                            className="h-10 text-xs"
+                          />
+                        )}
+                      </div>
+                      <div className="space-y-1 min-w-0">
+                        <Label htmlFor={`mapping-variant-${idx}`} className="text-xs font-medium">
+                          Variant file ({mapping.variantLabel})
+                        </Label>
+                        {variantFiles.length > 0 ? (
+                          <select
+                            id={`mapping-variant-${idx}`}
+                            value={mapping.variantFile}
+                            onChange={(e: ChangeEvent<HTMLSelectElement>) => handleFileMappingChange(idx, 'variantFile', e.target.value)}
+                            className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            <option value="">Select a file...</option>
+                            {variantFiles.map((file) => (
+                              <option key={file} value={file} title={file}>
+                                {file}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <Input
+                            id={`mapping-variant-${idx}`}
+                            placeholder="src/VolcanicCargo.java"
+                            value={mapping.variantFile}
+                            onChange={(e: ChangeEvent<HTMLInputElement>) => handleFileMappingChange(idx, 'variantFile', e.target.value)}
+                            className="h-10 text-xs"
+                          />
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`mapping-label-${idx}`} className="text-xs font-medium">
+                          Variant label
+                        </Label>
+                        <select
+                          id={`mapping-label-${idx}`}
+                          value={mapping.variantLabel}
+                          onChange={(e: ChangeEvent<HTMLSelectElement>) => handleFileMappingChange(idx, 'variantLabel', e.target.value)}
+                          className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          {variants.slice(1).map((v, vIdx) => (
+                            <option key={vIdx} value={v.label || `Variant ${vIdx + 2}`}>
+                              {v.label || `Variant ${vIdx + 2}`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-end justify-end md:justify-start">
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleRemoveFileMapping(idx)}
+                          className="h-10"
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleAddFileMapping} disabled={isBusy}>
+              Add mapping
+            </Button>
+            {Object.keys(availableFiles).length === 0 && !loadingFiles && (
+              <Button variant="outline" size="sm" onClick={fetchAvailableFiles} disabled={loadingFiles}>
+                Load files
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {status && (
         <div

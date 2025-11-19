@@ -1,3 +1,9 @@
+export type FileMapping = {
+  baseFile: string;
+  variantFile: string;
+  variantLabel: string;
+};
+
 export type VariantForm = {
   label: string;
   testRepo: string;
@@ -11,6 +17,7 @@ export type ExerciseConfig = {
   targetFolder: string;
   exerciseName: string;
   variants: VariantForm[];
+  fileMappings?: FileMapping[];
 };
 
 export type MultiExerciseConfig = {

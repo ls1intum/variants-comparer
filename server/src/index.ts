@@ -65,10 +65,17 @@ const variantSchema = z.object({
   courseLink: optionalLinkField,
 });
 
+const fileMappingSchema = z.object({
+  baseFile: z.string().min(1, 'Base file path is required'),
+  variantFile: z.string().min(1, 'Variant file path is required'),
+  variantLabel: z.string().min(1, 'Variant label is required'),
+});
+
 const payloadSchema = z.object({
   targetFolder: z.string().min(1, 'Target folder is required'),
   exerciseName: z.string().trim().min(1, 'Exercise name is required'),
   variants: z.array(variantSchema).length(3, 'Exactly three variants are required'),
+  fileMappings: z.array(fileMappingSchema).optional().default([]),
 });
 
 const multiExerciseConfigSchema = z.object({
@@ -133,6 +140,7 @@ const defaultConfig: Payload = {
     markdown: '',
     courseLink: '',
   })),
+  fileMappings: [],
 };
 
 const defaultMultiExerciseConfig: MultiExerciseConfig = {
@@ -457,6 +465,9 @@ app.post('/api/compare', async (req, res) => {
 
     const baseRepoFiles = await readFilesRecursive(baseDir, baseDir);
     
+    // Get file mappings for this exercise
+    const fileMappings = config.fileMappings || [];
+    
     // Collect all variant file maps
     const variantFileMaps: Array<{ label: string; files: Map<string, string>; exists: boolean }> = await Promise.all(
       config.variants.slice(1).map(async (variant, idx) => {
@@ -471,9 +482,26 @@ app.post('/api/compare', async (req, res) => {
           };
         }
         const variantFiles = await readFilesRecursive(variantDir, variantDir);
+        
+        // Apply file mappings for this variant
+        const mappedFiles = new Map<string, string>();
+        variantFiles.forEach((content, filePath) => {
+          // Check if this file has a mapping
+          const mapping = fileMappings.find(
+            m => m.variantFile === filePath && m.variantLabel === variant.label
+          );
+          if (mapping) {
+            // Use the base file name for comparison
+            mappedFiles.set(mapping.baseFile, content);
+          } else {
+            // Keep original file path
+            mappedFiles.set(filePath, content);
+          }
+        });
+        
         return {
           label: variant.label || `Variant ${idx + 2}`,
-          files: variantFiles,
+          files: mappedFiles,
           exists: true,
         };
       }),
@@ -543,6 +571,50 @@ app.post('/api/compare', async (req, res) => {
       res.status(400).json({ ok: false, error: error.flatten() });
       return;
     }
+    res.status(500).json({ ok: false, error: (error as Error).message });
+  }
+});
+
+app.get('/api/files', async (_req, res) => {
+  try {
+    const multiConfig = await readMultiExerciseConfig();
+    const config = multiConfig.exercises[multiConfig.activeExerciseIndex];
+    
+    if (!config) {
+      res.status(400).json({ ok: false, error: 'No active exercise found.' });
+      return;
+    }
+
+    const targetRoot = normalizeTargetFolder(config.targetFolder);
+    const exerciseSlug = slugify(config.exerciseName, 'exercise');
+    
+    const filesByVariant: Record<string, { label: string; files: string[] }> = {};
+    
+    for (const [idx, variant] of config.variants.entries()) {
+      const variantSlug = slugify(variant.label, `variant-${idx + 1}`);
+      const variantFiles: string[] = [];
+      
+      // Collect files from all repo types (test, solution, template)
+      for (const repoType of ['test', 'solution', 'template'] as const) {
+        const variantDir = path.join(targetRoot, exerciseSlug, variantSlug, repoType);
+        if (await fs.pathExists(variantDir)) {
+          const files = await readFilesRecursive(variantDir, variantDir);
+          files.forEach((_, relPath) => {
+            if (!variantFiles.includes(relPath)) {
+              variantFiles.push(relPath);
+            }
+          });
+        }
+      }
+      
+      filesByVariant[variant.label || `Variant ${idx + 1}`] = {
+        label: variant.label || `Variant ${idx + 1}`,
+        files: variantFiles.sort(),
+      };
+    }
+    
+    res.json({ ok: true, filesByVariant });
+  } catch (error) {
     res.status(500).json({ ok: false, error: (error as Error).message });
   }
 });
