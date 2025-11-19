@@ -5,6 +5,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import { simpleGit } from 'simple-git';
 import { z } from 'zod';
+import { diffChars } from 'diff';
 
 const app = express();
 app.use(cors());
@@ -614,6 +615,115 @@ app.get('/api/files', async (_req, res) => {
     }
     
     res.json({ ok: true, filesByVariant });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: (error as Error).message });
+  }
+});
+
+function calculateSimilarity(content1: string, content2: string): number {
+  if (content1 === content2) return 100;
+  if (!content1 || !content2) return 0;
+  
+  const changes = diffChars(content1, content2);
+  let totalChars = 0;
+  let matchingChars = 0;
+  
+  for (const change of changes) {
+    const length = change.value.length;
+    totalChars += length;
+    if (!change.added && !change.removed) {
+      matchingChars += length;
+    }
+  }
+  
+  return totalChars > 0 ? Math.round((matchingChars / totalChars) * 100) : 0;
+}
+
+app.get('/api/suggest-mappings', async (req, res) => {
+  try {
+    const thresholdParam = req.query.threshold;
+    const threshold = thresholdParam ? Number(thresholdParam) : 30; // Default 30% similarity
+    
+    const multiConfig = await readMultiExerciseConfig();
+    const config = multiConfig.exercises[multiConfig.activeExerciseIndex];
+    
+    if (!config) {
+      res.status(400).json({ ok: false, error: 'No active exercise found.' });
+      return;
+    }
+
+    const targetRoot = normalizeTargetFolder(config.targetFolder);
+    const exerciseSlug = slugify(config.exerciseName, 'exercise');
+    const baseVariant = config.variants[0];
+    
+    if (!baseVariant) {
+      res.status(400).json({ ok: false, error: 'Base variant not found.' });
+      return;
+    }
+    
+    const baseSlug = slugify(baseVariant.label, 'variant-1');
+    
+    const suggestions: Array<{
+      baseFile: string;
+      variantFile: string;
+      variantLabel: string;
+      similarity: number;
+    }> = [];
+    
+    // Get base variant files
+    const baseFileMap = new Map<string, string>();
+    for (const repoType of ['test', 'solution', 'template'] as const) {
+      const baseDir = path.join(targetRoot, exerciseSlug, baseSlug, repoType);
+      if (await fs.pathExists(baseDir)) {
+        const files = await readFilesRecursive(baseDir, baseDir);
+        files.forEach((content, relPath) => {
+          baseFileMap.set(relPath, content);
+        });
+      }
+    }
+    
+    // Compare with other variants
+    for (const [idx, variant] of config.variants.slice(1).entries()) {
+      const variantSlug = slugify(variant.label, `variant-${idx + 2}`);
+      const variantFileMap = new Map<string, string>();
+      
+      for (const repoType of ['test', 'solution', 'template'] as const) {
+        const variantDir = path.join(targetRoot, exerciseSlug, variantSlug, repoType);
+        if (await fs.pathExists(variantDir)) {
+          const files = await readFilesRecursive(variantDir, variantDir);
+          files.forEach((content, relPath) => {
+            variantFileMap.set(relPath, content);
+          });
+        }
+      }
+      
+      // Find files that exist in variant but not in base (renamed candidates)
+      for (const [variantFile, variantContent] of variantFileMap) {
+        if (!baseFileMap.has(variantFile)) {
+          // This file doesn't exist in base with same name, check similarity with all base files
+          for (const [baseFile, baseContent] of baseFileMap) {
+            if (!variantFileMap.has(baseFile)) {
+              // Base file also doesn't exist in variant with same name
+              const similarity = calculateSimilarity(baseContent, variantContent);
+              
+              if (similarity >= threshold) {
+                suggestions.push({
+                  baseFile,
+                  variantFile,
+                  variantLabel: variant.label || `Variant ${idx + 2}`,
+                  similarity,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Sort by similarity (highest first)
+    suggestions.sort((a, b) => b.similarity - a.similarity);
+    
+    res.json({ ok: true, suggestions });
   } catch (error) {
     res.status(500).json({ ok: false, error: (error as Error).message });
   }

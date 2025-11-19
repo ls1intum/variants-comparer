@@ -31,6 +31,8 @@ function ConfigurePage() {
   const [currentStep, setCurrentStep] = useState('');
   const [availableFiles, setAvailableFiles] = useState<Record<string, { label: string; files: string[] }>>({});
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [suggestions, setSuggestions] = useState<Array<{ baseFile: string; variantFile: string; variantLabel: string; similarity: number }>>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
   const variants = currentExercise.variants;
   const targetFolder = currentExercise.targetFolder;
@@ -219,10 +221,55 @@ function ConfigurePage() {
     }
   };
 
+  const fetchSuggestions = async (threshold = 30) => {
+    setLoadingSuggestions(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/suggest-mappings?threshold=${threshold}`);
+      const data = await response.json();
+      if (data.ok && data.suggestions) {
+        setSuggestions(data.suggestions);
+      }
+    } catch (error) {
+      console.error('Failed to fetch suggestions:', error);
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  };
+
+  const acceptSuggestion = (suggestion: { baseFile: string; variantFile: string; variantLabel: string; similarity: number }) => {
+    setExercises((prev) => prev.map((ex, idx) => {
+      if (idx !== activeExerciseIndex) return ex;
+      const newMapping: FileMapping = {
+        baseFile: suggestion.baseFile,
+        variantFile: suggestion.variantFile,
+        variantLabel: suggestion.variantLabel,
+      };
+      return {
+        ...ex,
+        fileMappings: [...(ex.fileMappings || []), newMapping],
+      };
+    }));
+    // Remove accepted suggestion from list
+    setSuggestions((prev) => prev.filter((s) => 
+      !(s.baseFile === suggestion.baseFile && 
+        s.variantFile === suggestion.variantFile && 
+        s.variantLabel === suggestion.variantLabel)
+    ));
+  };
+
+  const rejectSuggestion = (suggestion: { baseFile: string; variantFile: string; variantLabel: string; similarity: number }) => {
+    setSuggestions((prev) => prev.filter((s) => 
+      !(s.baseFile === suggestion.baseFile && 
+        s.variantFile === suggestion.variantFile && 
+        s.variantLabel === suggestion.variantLabel)
+    ));
+  };
+
   useEffect(() => {
-    // Fetch files when results are available (after download)
+    // Fetch files and suggestions when results are available (after download)
     if (results.length > 0) {
       fetchAvailableFiles();
+      fetchSuggestions();
     }
   }, [results]);
 
@@ -373,6 +420,65 @@ function ConfigurePage() {
               ).join(', ')}
             </div>
           )}
+          
+          {/* Suggestions Section */}
+          {loadingSuggestions && (
+            <div className="rounded-md border border-border/70 bg-muted px-4 py-3">
+              <p className="text-sm text-muted-foreground">Analyzing files for potential mappings...</p>
+            </div>
+          )}
+          {!loadingSuggestions && suggestions.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">Suggested Mappings (≥30% similarity)</p>
+                <Button variant="ghost" size="sm" onClick={() => setSuggestions([])}>
+                  Dismiss all
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {suggestions.map((suggestion, idx) => (
+                  <div key={idx} className="flex items-center gap-3 rounded-md border border-green-200 bg-green-50 p-3">
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="font-medium text-green-900">Match: {suggestion.similarity}%</span>
+                        <span className="text-muted-foreground">•</span>
+                        <span className="text-muted-foreground">{suggestion.variantLabel}</span>
+                      </div>
+                      <div className="grid gap-2 text-xs md:grid-cols-2">
+                        <div>
+                          <span className="text-muted-foreground">Base: </span>
+                          <span className="font-mono">{suggestion.baseFile}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Variant: </span>
+                          <span className="font-mono">{suggestion.variantFile}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => acceptSuggestion(suggestion)}
+                        className="h-8 bg-green-600 hover:bg-green-700"
+                      >
+                        Accept
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => rejectSuggestion(suggestion)}
+                        className="h-8"
+                      >
+                        Reject
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
           {fileMappings.length === 0 ? (
             <p className="text-sm text-muted-foreground">No file mappings configured. Click &quot;Add mapping&quot; to start.</p>
           ) : (
@@ -481,6 +587,11 @@ function ConfigurePage() {
             {Object.keys(availableFiles).length === 0 && !loadingFiles && (
               <Button variant="outline" size="sm" onClick={fetchAvailableFiles} disabled={loadingFiles}>
                 Load files
+              </Button>
+            )}
+            {Object.keys(availableFiles).length > 0 && !loadingSuggestions && (
+              <Button variant="outline" size="sm" onClick={() => fetchSuggestions()} disabled={loadingSuggestions}>
+                Suggest mappings
               </Button>
             )}
           </div>
