@@ -42,6 +42,8 @@ function getInlineDiff(text1: string, text2: string): { left: CharSegment[]; rig
   return { left, right };
 }
 
+type OpenExternalAction = 'vscode-together' | 'vscode-separately';
+
 function FileComparisonCard({ 
   fileComp, 
   baseVariant, 
@@ -50,7 +52,7 @@ function FileComparisonCard({
   reviewStatus,
   onReviewStatusChange,
   compareType,
-  onOpenInVSCode,
+  onOpenExternal,
 }: { 
   fileComp: FileComparison; 
   baseVariant: string;
@@ -59,11 +61,12 @@ function FileComparisonCard({
   reviewStatus: ReviewStatus;
   onReviewStatusChange: (status: ReviewStatus) => void;
   compareType: CompareType;
-  onOpenInVSCode: (relativePath: string, variantLabel: string, mappedPath?: string) => void;
+  onOpenExternal: (relativePath: string, variantLabel: string, action: OpenExternalAction, mappedPath?: string) => void;
 }) {
   const baseLines = fileComp.baseContent.split('\n');
   const scrollRefs = useRef<(HTMLDivElement | null)[]>([]);
   const hasScrolledToFirst = useRef(false);
+  const [showOpenMenu, setShowOpenMenu] = useState(false);
   
   // Only show the selected variant
   const selectedVariant = fileComp.variants[activeVariantIndex];
@@ -126,8 +129,8 @@ function FileComparisonCard({
     reviewStatus === 'needs-attention' ? 'border-red-500 border-2' : 
     'border-slate-300';
 
-  // VS Code button is only available for repo comparisons, not markdown
-  const canOpenInVSCode = compareType !== 'problem';
+  // External tools available for repo comparisons, not markdown
+  const canOpenExternal = compareType !== 'problem';
 
   return (
     <Card className={`border ${borderColorClass}`}>
@@ -145,15 +148,45 @@ function FileComparisonCard({
                 </span>
               </div>
             )}
-            {/* VS Code button */}
-            {canOpenInVSCode && selectedVariant && (
-              <button
-                onClick={() => onOpenInVSCode(fileComp.relativePath, selectedVariant.variant, mapping?.variantFile)}
-                className="p-1.5 rounded-md transition-colors hover:bg-blue-50"
-                title="Open in VS Code (new window)"
-              >
-                <img src="/vscode_icon.svg" alt="VS Code" width="16" height="16" />
-              </button>
+            {/* VS Code dropdown */}
+            {canOpenExternal && selectedVariant && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowOpenMenu(!showOpenMenu)}
+                  onBlur={() => setTimeout(() => setShowOpenMenu(false), 150)}
+                  className="p-1.5 rounded-md transition-colors hover:bg-blue-50 flex items-center gap-1"
+                  title="Open in VS Code"
+                >
+                  <img src="/vscode_icon.svg" alt="VS Code" width="16" height="16" />
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </button>
+                {showOpenMenu && (
+                  <div className="absolute right-0 top-full mt-1 bg-white rounded-md shadow-lg border border-slate-200 py-1 z-50 min-w-[200px]">
+                    <button
+                      onClick={() => {
+                        onOpenExternal(fileComp.relativePath, selectedVariant.variant, 'vscode-together', mapping?.variantFile);
+                        setShowOpenMenu(false);
+                      }}
+                      className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2"
+                    >
+                      <img src="/vscode_icon.svg" alt="" width="14" height="14" />
+                      Open Together
+                    </button>
+                    <button
+                      onClick={() => {
+                        onOpenExternal(fileComp.relativePath, selectedVariant.variant, 'vscode-separately', mapping?.variantFile);
+                        setShowOpenMenu(false);
+                      }}
+                      className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2"
+                    >
+                      <img src="/vscode_icon.svg" alt="" width="14" height="14" />
+                      Open Separately
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
             {/* Review status buttons */}
             <div className="flex items-center gap-1 ml-2">
@@ -474,8 +507,8 @@ function ComparePage() {
     }
   }, [getReviewKey, exerciseName, compareType]);
 
-  // Open files in VS Code diff view
-  const handleOpenInVSCode = useCallback(async (relativePath: string, variantLabel: string, mappedPath?: string) => {
+  // Open files in VS Code
+  const handleOpenExternal = useCallback(async (relativePath: string, variantLabel: string, action: OpenExternalAction, mappedPath?: string) => {
     try {
       const response = await fetch(`${API_BASE}/api/open-vscode-diff`, {
         method: 'POST',
@@ -495,27 +528,31 @@ function ComparePage() {
       
       const { baseFilePath, variantFilePath } = data;
       
-      // Use vscode:// URL scheme to open files in a new window
-      // Adding windowId=_blank opens in a new VS Code window
-      // Format: vscode://file/path?windowId=_blank
-      
-      if (baseFilePath && variantFilePath) {
-        // Open both files in a new VS Code window
-        // First file opens new window, second file opens in same new window
-        window.open(`vscode://file${baseFilePath}?windowId=_blank`, '_blank');
-        
-        // Open second file after a short delay so VS Code processes them in order
-        setTimeout(() => {
-          // Don't use _blank for second file - it should open in the same new window
-          window.open(`vscode://file${variantFilePath}`, '_blank');
-        }, 500);
-      } else if (baseFilePath) {
-        window.open(`vscode://file${baseFilePath}?windowId=_blank`, '_blank');
-      } else if (variantFilePath) {
-        window.open(`vscode://file${variantFilePath}?windowId=_blank`, '_blank');
+      if (action === 'vscode-together') {
+        // Open both files in the same VS Code window
+        if (baseFilePath && variantFilePath) {
+          window.open(`vscode://file${baseFilePath}?windowId=_blank`, '_blank');
+          setTimeout(() => {
+            window.open(`vscode://file${variantFilePath}`, '_blank');
+          }, 500);
+        } else if (baseFilePath) {
+          window.open(`vscode://file${baseFilePath}?windowId=_blank`, '_blank');
+        } else if (variantFilePath) {
+          window.open(`vscode://file${variantFilePath}?windowId=_blank`, '_blank');
+        }
+      } else if (action === 'vscode-separately') {
+        // Open each file in its own new VS Code window
+        if (baseFilePath) {
+          window.open(`vscode://file${baseFilePath}?windowId=_blank`, '_blank');
+        }
+        if (variantFilePath) {
+          setTimeout(() => {
+            window.open(`vscode://file${variantFilePath}?windowId=_blank`, '_blank');
+          }, 300);
+        }
       }
     } catch (error) {
-      console.error('Failed to open VS Code:', error);
+      console.error('Failed to open in VS Code:', error);
     }
   }, [compareType]);
 
@@ -662,7 +699,7 @@ function ComparePage() {
                   reviewStatus={reviewStatus}
                   onReviewStatusChange={(status) => handleReviewStatusChange(fileComp.relativePath, currentVariantLabel, status)}
                   compareType={compareType}
-                  onOpenInVSCode={handleOpenInVSCode}
+                  onOpenExternal={handleOpenExternal}
                 />
               );
             })}
