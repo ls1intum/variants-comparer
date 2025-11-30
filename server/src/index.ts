@@ -1005,13 +1005,24 @@ app.get('/api/stats', async (_req, res) => {
       // Get reviews for this exercise
       const exerciseReviews = reviewStatuses.filter(r => r.filePath.startsWith(`${exerciseName}:`));
       
-      // Count by compareType and status
+      // Count by compareType and status (overall)
       const byCompareType: Record<string, { correct: number; needsAttention: number; total: number }> = {
         problem: { correct: 0, needsAttention: 0, total: 0 },
         test: { correct: 0, needsAttention: 0, total: 0 },
         solution: { correct: 0, needsAttention: 0, total: 0 },
         template: { correct: 0, needsAttention: 0, total: 0 },
       };
+      
+      // Per-variant stats
+      const byVariant: Record<string, Record<string, { correct: number; needsAttention: number; total: number }>> = {};
+      for (const variant of compareVariants) {
+        byVariant[variant.label] = {
+          problem: { correct: 0, needsAttention: 0, total: 0 },
+          test: { correct: 0, needsAttention: 0, total: 0 },
+          solution: { correct: 0, needsAttention: 0, total: 0 },
+          template: { correct: 0, needsAttention: 0, total: 0 },
+        };
+      }
       
       // Try to count actual files for each compare type
       // Use same path structure as compare endpoint: targetRoot/exerciseSlug/baseSlug/folderName
@@ -1031,6 +1042,13 @@ app.get('/api/stats', async (_req, res) => {
             if (entry) {
               entry.total = files.length * compareVariants.length;
             }
+            // Per variant total
+            for (const variant of compareVariants) {
+              const variantEntry = byVariant[variant.label]?.[ct];
+              if (variantEntry) {
+                variantEntry.total = files.length;
+              }
+            }
           }
         } catch {
           // Ignore errors reading files
@@ -1041,16 +1059,35 @@ app.get('/api/stats', async (_req, res) => {
       if (byCompareType.problem) {
         byCompareType.problem.total = compareVariants.length;
       }
+      for (const variant of compareVariants) {
+        const variantEntry = byVariant[variant.label]?.problem;
+        if (variantEntry) {
+          variantEntry.total = 1;
+        }
+      }
       
-      // Count reviews
+      // Count reviews (overall and per-variant)
       for (const review of exerciseReviews) {
         const ct = review.compareType;
+        const variantLabel = review.variantLabel;
+        
+        // Overall count
         const entry = byCompareType[ct];
         if (entry) {
           if (review.status === 'correct') {
             entry.correct++;
           } else if (review.status === 'needs-attention') {
             entry.needsAttention++;
+          }
+        }
+        
+        // Per-variant count
+        const variantEntry = byVariant[variantLabel]?.[ct];
+        if (variantEntry) {
+          if (review.status === 'correct') {
+            variantEntry.correct++;
+          } else if (review.status === 'needs-attention') {
+            variantEntry.needsAttention++;
           }
         }
       }
@@ -1060,6 +1097,7 @@ app.get('/api/stats', async (_req, res) => {
         targetFolder,
         variants: variants.map(v => v.label),
         byCompareType,
+        byVariant,
         totalReviewed: exerciseReviews.length,
       };
     }));

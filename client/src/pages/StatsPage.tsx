@@ -15,6 +15,7 @@ type ExerciseStats = {
   targetFolder: string;
   variants: string[];
   byCompareType: Record<string, CompareTypeStats>;
+  byVariant: Record<string, Record<string, CompareTypeStats>>;
   totalReviewed: number;
 };
 
@@ -275,6 +276,75 @@ function StatsPage() {
                     );
                   })}
                 </div>
+
+                {/* Per-variant breakdown */}
+                {exercise.byVariant && Object.keys(exercise.byVariant).length > 0 && (
+                  <div className="border-t pt-4 mt-4">
+                    <h4 className="text-sm font-medium mb-3 text-muted-foreground">Per Variant Breakdown</h4>
+                    <div className="space-y-4">
+                      {Object.entries(exercise.byVariant).map(([variantLabel, variantStats]) => {
+                        const variantTotal = Object.entries(variantStats)
+                          .filter(([type]) => includedTypes.includes(type as CompareType))
+                          .reduce((sum, [, ct]) => sum + ct.total, 0);
+                        const variantReviewed = Object.entries(variantStats)
+                          .filter(([type]) => includedTypes.includes(type as CompareType))
+                          .reduce((sum, [, ct]) => sum + ct.correct + ct.needsAttention, 0);
+                        const variantProgress = variantTotal > 0 ? (variantReviewed / variantTotal) * 100 : 0;
+                        const variantCorrect = Object.entries(variantStats)
+                          .filter(([type]) => includedTypes.includes(type as CompareType))
+                          .reduce((sum, [, ct]) => sum + ct.correct, 0);
+                        const variantNeedsAttention = Object.entries(variantStats)
+                          .filter(([type]) => includedTypes.includes(type as CompareType))
+                          .reduce((sum, [, ct]) => sum + ct.needsAttention, 0);
+
+                        return (
+                          <div key={variantLabel} className="p-3 rounded-lg border bg-white">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium text-sm">{variantLabel}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {variantReviewed}/{variantTotal} ({Math.round(variantProgress)}%)
+                              </span>
+                            </div>
+                            <Progress value={variantProgress} className="h-1.5 mb-2" />
+                            <div className="flex flex-wrap gap-3 text-xs">
+                              {variantCorrect > 0 && (
+                                <span className="text-green-700">✓ {variantCorrect}</span>
+                              )}
+                              {variantNeedsAttention > 0 && (
+                                <span className="text-red-600">⚠ {variantNeedsAttention}</span>
+                              )}
+                              {variantTotal - variantReviewed > 0 && (
+                                <span className="text-slate-500">{variantTotal - variantReviewed} left</span>
+                              )}
+                            </div>
+                            {/* Mini breakdown by type */}
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {Object.entries(variantStats)
+                                .filter(([type]) => includedTypes.includes(type as CompareType))
+                                .map(([type, ct]) => {
+                                  const typeReviewed = ct.correct + ct.needsAttention;
+                                  return (
+                                    <span
+                                      key={type}
+                                      className={`text-xs px-2 py-0.5 rounded ${
+                                        typeReviewed === ct.total && ct.total > 0
+                                          ? 'bg-green-100 text-green-700'
+                                          : typeReviewed > 0
+                                          ? 'bg-amber-100 text-amber-700'
+                                          : 'bg-slate-100 text-slate-500'
+                                      }`}
+                                    >
+                                      {compareTypeLabels[type]?.split(' ')[0] || type}: {typeReviewed}/{ct.total}
+                                    </span>
+                                  );
+                                })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
