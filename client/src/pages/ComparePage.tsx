@@ -4,7 +4,6 @@ import DiffMatchPatch from 'diff-match-patch';
 import { API_BASE } from '@/lib/api';
 import type { CompareType, ComparisonResponse, FileComparison, ReviewStatus } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useExercise } from '@/contexts/ExerciseContext';
 
@@ -634,20 +633,20 @@ function ComparePage() {
           <CardDescription>Select the content to diff against Variant 1.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="compareType">Compare</Label>
-            <select
-              id="compareType"
-              value={compareType}
-              onChange={(event) => setCompareType(event.target.value as CompareType)}
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-            >
-              {compareOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+          <div className="flex flex-wrap gap-2">
+            {compareOptions.map((option) => (
+              <button
+                key={option.value}
+                onClick={() => setCompareType(option.value)}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                  compareType === option.value
+                    ? 'bg-primary text-primary-foreground shadow'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
         </CardContent>
       </Card>
