@@ -92,6 +92,7 @@ const multiExerciseConfigSchema = z.object({
   exercises: z.array(payloadSchema).min(1, 'At least one exercise is required'),
   activeExerciseIndex: z.number().int().min(0).default(0),
   reviewStatuses: z.array(fileReviewSchema).optional().default([]),
+  statsIncludedTypes: z.array(z.enum(['problem', 'test', 'solution', 'template'])).optional().default(['problem', 'test', 'solution', 'template']),
 });
 
 const compareTypeSchema = z.enum(['problem', 'test', 'solution', 'template']);
@@ -291,6 +292,7 @@ const defaultMultiExerciseConfig: MultiExerciseConfig = {
   exercises: [defaultConfig],
   activeExerciseIndex: 0,
   reviewStatuses: [],
+  statsIncludedTypes: ['problem', 'test', 'solution', 'template'],
 };
 
 function slugify(input: string, fallback: string) {
@@ -350,6 +352,7 @@ async function readMultiExerciseConfig(): Promise<MultiExerciseConfig> {
         exercises: [single],
         activeExerciseIndex: 0,
         reviewStatuses: [],
+        statsIncludedTypes: ['problem', 'test', 'solution', 'template'],
       };
     }
   } catch (err) {
@@ -412,6 +415,7 @@ app.post('/api/save', async (req, res) => {
       exercises: normalizedExercises,
       activeExerciseIndex: multiConfig.activeExerciseIndex,
       reviewStatuses: existingConfig.reviewStatuses || [],
+      statsIncludedTypes: existingConfig.statsIncludedTypes || ['problem', 'test', 'solution', 'template'],
     };
     
     await writeMultiExerciseConfig(normalizedConfig);
@@ -949,6 +953,36 @@ app.get('/api/review-status', async (_req, res) => {
     const config = await readMultiExerciseConfig();
     res.json({ ok: true, reviewStatuses: config.reviewStatuses || [] });
   } catch (error) {
+    res.status(500).json({ ok: false, error: (error as Error).message });
+  }
+});
+
+// Stats included types endpoints
+app.get('/api/stats-included-types', async (_req, res) => {
+  try {
+    const config = await readMultiExerciseConfig();
+    res.json({ ok: true, statsIncludedTypes: config.statsIncludedTypes || ['problem', 'test', 'solution', 'template'] });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: (error as Error).message });
+  }
+});
+
+const statsIncludedTypesSchema = z.object({
+  statsIncludedTypes: z.array(z.enum(['problem', 'test', 'solution', 'template'])),
+});
+
+app.post('/api/stats-included-types', async (req, res) => {
+  try {
+    const { statsIncludedTypes } = statsIncludedTypesSchema.parse(req.body);
+    const config = await readMultiExerciseConfig();
+    config.statsIncludedTypes = statsIncludedTypes;
+    await writeMultiExerciseConfig(config);
+    res.json({ ok: true });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ ok: false, error: error.flatten() });
+      return;
+    }
     res.status(500).json({ ok: false, error: (error as Error).message });
   }
 });

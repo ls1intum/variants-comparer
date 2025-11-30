@@ -33,6 +33,7 @@ export type MultiExerciseConfig = {
   exercises: ExerciseConfig[];
   activeExerciseIndex: number;
   reviewStatuses?: FileReview[];
+  statsIncludedTypes?: CompareType[];
 };
 
 export type DownloadResult = {

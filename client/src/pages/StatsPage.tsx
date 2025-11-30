@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { API_BASE } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import type { CompareType } from '@/types';
 
 type CompareTypeStats = {
   correct: number;
@@ -29,21 +30,37 @@ const compareTypeLabels: Record<string, string> = {
   template: 'Template Repositories',
 };
 
+const allCompareTypes: CompareType[] = ['problem', 'test', 'solution', 'template'];
+
 function StatsPage() {
   const [stats, setStats] = useState<ExerciseStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [includedTypes, setIncludedTypes] = useState<CompareType[]>(allCompareTypes);
 
+  // Fetch stats and included types
   useEffect(() => {
-    const fetchStats = async () => {
+    const fetchData = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`${API_BASE}/api/stats`);
-        const data: StatsResponse = await response.json();
-        if (data.ok) {
-          setStats(data.stats);
+        
+        // Fetch both stats and included types in parallel
+        const [statsRes, typesRes] = await Promise.all([
+          fetch(`${API_BASE}/api/stats`),
+          fetch(`${API_BASE}/api/stats-included-types`),
+        ]);
+        
+        const statsData: StatsResponse = await statsRes.json();
+        const typesData = await typesRes.json();
+        
+        if (statsData.ok) {
+          setStats(statsData.stats);
         } else {
           setError('Failed to load stats');
+        }
+        
+        if (typesData.ok && typesData.statsIncludedTypes) {
+          setIncludedTypes(typesData.statsIncludedTypes);
         }
       } catch (err) {
         setError('Failed to fetch stats');
@@ -52,8 +69,28 @@ function StatsPage() {
         setLoading(false);
       }
     };
-    fetchStats();
+    fetchData();
   }, []);
+
+  // Toggle a compare type and save to server
+  const toggleIncludedType = async (type: CompareType) => {
+    const newIncluded = includedTypes.includes(type)
+      ? includedTypes.filter(t => t !== type)
+      : [...includedTypes, type];
+    
+    setIncludedTypes(newIncluded);
+    
+    // Save to server
+    try {
+      await fetch(`${API_BASE}/api/stats-included-types`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ statsIncludedTypes: newIncluded }),
+      });
+    } catch (err) {
+      console.error('Failed to save included types:', err);
+    }
+  };
 
   if (loading) {
     return (
@@ -79,13 +116,15 @@ function StatsPage() {
     );
   }
 
-  // Calculate overall stats
+  // Calculate overall stats (only for included types)
   const overallStats = stats.reduce(
     (acc, exercise) => {
-      Object.values(exercise.byCompareType).forEach(ct => {
-        acc.correct += ct.correct;
-        acc.needsAttention += ct.needsAttention;
-        acc.total += ct.total;
+      Object.entries(exercise.byCompareType).forEach(([type, ct]) => {
+        if (includedTypes.includes(type as CompareType)) {
+          acc.correct += ct.correct;
+          acc.needsAttention += ct.needsAttention;
+          acc.total += ct.total;
+        }
       });
       return acc;
     },
@@ -111,6 +150,27 @@ function StatsPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
+            {/* Filter toggles */}
+            <div className="flex flex-wrap items-center gap-2 pb-2 border-b">
+              <span className="text-sm text-muted-foreground mr-2">Include in progress:</span>
+              {allCompareTypes.map((type) => {
+                const isIncluded = includedTypes.includes(type);
+                return (
+                  <button
+                    key={type}
+                    onClick={() => toggleIncludedType(type)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                      isIncluded
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    }`}
+                  >
+                    {compareTypeLabels[type]}
+                  </button>
+                );
+              })}
+            </div>
+
             <div className="flex items-center justify-between text-sm">
               <span>
                 {overallReviewed} of {overallStats.total} files reviewed
@@ -138,17 +198,20 @@ function StatsPage() {
 
       {/* Per-Exercise Stats */}
       {stats.map((exercise) => {
-        const exerciseTotal = Object.values(exercise.byCompareType).reduce((sum, ct) => sum + ct.total, 0);
-        const exerciseReviewed = Object.values(exercise.byCompareType).reduce(
-          (sum, ct) => sum + ct.correct + ct.needsAttention,
-          0
-        );
+        // Calculate stats only for included types
+        const exerciseTotal = Object.entries(exercise.byCompareType)
+          .filter(([type]) => includedTypes.includes(type as CompareType))
+          .reduce((sum, [, ct]) => sum + ct.total, 0);
+        const exerciseReviewed = Object.entries(exercise.byCompareType)
+          .filter(([type]) => includedTypes.includes(type as CompareType))
+          .reduce((sum, [, ct]) => sum + ct.correct + ct.needsAttention, 0);
         const exerciseProgress = exerciseTotal > 0 ? (exerciseReviewed / exerciseTotal) * 100 : 0;
-        const exerciseCorrect = Object.values(exercise.byCompareType).reduce((sum, ct) => sum + ct.correct, 0);
-        const exerciseNeedsAttention = Object.values(exercise.byCompareType).reduce(
-          (sum, ct) => sum + ct.needsAttention,
-          0
-        );
+        const exerciseCorrect = Object.entries(exercise.byCompareType)
+          .filter(([type]) => includedTypes.includes(type as CompareType))
+          .reduce((sum, [, ct]) => sum + ct.correct, 0);
+        const exerciseNeedsAttention = Object.entries(exercise.byCompareType)
+          .filter(([type]) => includedTypes.includes(type as CompareType))
+          .reduce((sum, [, ct]) => sum + ct.needsAttention, 0);
 
         return (
           <Card key={exercise.exerciseName}>
@@ -176,9 +239,11 @@ function StatsPage() {
                   </div>
                 </div>
 
-                {/* Per compare type breakdown */}
+                {/* Per compare type breakdown - only show included types */}
                 <div className="grid gap-4 md:grid-cols-2">
-                  {Object.entries(exercise.byCompareType).map(([type, ct]) => {
+                  {Object.entries(exercise.byCompareType)
+                    .filter(([type]) => includedTypes.includes(type as CompareType))
+                    .map(([type, ct]) => {
                     const reviewed = ct.correct + ct.needsAttention;
                     const progress = ct.total > 0 ? (reviewed / ct.total) * 100 : 0;
                     const remaining = ct.total - reviewed;
