@@ -191,6 +191,7 @@ function FileComparisonCard({
                               </span>
                             );
                           }
+                          
                           return lineContent || ' ';
                         };
                         
@@ -307,6 +308,7 @@ function FileComparisonCard({
                               </span>
                             );
                           }
+                          
                           return lineContent || ' ';
                         };
                         
