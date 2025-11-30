@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { API_BASE } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import type { CompareType } from '@/types';
+import type { CompareType, FileReview } from '@/types';
 
 type CompareTypeStats = {
   correct: number;
@@ -38,21 +38,24 @@ function StatsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [includedTypes, setIncludedTypes] = useState<CompareType[]>(allCompareTypes);
+  const [reviewStatuses, setReviewStatuses] = useState<FileReview[]>([]);
 
-  // Fetch stats and included types
+  // Fetch stats, included types, and review statuses
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         
-        // Fetch both stats and included types in parallel
-        const [statsRes, typesRes] = await Promise.all([
+        // Fetch stats, included types, and review statuses in parallel
+        const [statsRes, typesRes, reviewRes] = await Promise.all([
           fetch(`${API_BASE}/api/stats`),
           fetch(`${API_BASE}/api/stats-included-types`),
+          fetch(`${API_BASE}/api/review-status`),
         ]);
         
         const statsData: StatsResponse = await statsRes.json();
         const typesData = await typesRes.json();
+        const reviewData = await reviewRes.json();
         
         if (statsData.ok) {
           setStats(statsData.stats);
@@ -62,6 +65,10 @@ function StatsPage() {
         
         if (typesData.ok && typesData.statsIncludedTypes) {
           setIncludedTypes(typesData.statsIncludedTypes);
+        }
+        
+        if (reviewData.ok && reviewData.reviewStatuses) {
+          setReviewStatuses(reviewData.reviewStatuses);
         }
       } catch (err) {
         setError('Failed to fetch stats');
@@ -196,6 +203,60 @@ function StatsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Files Needing Attention */}
+      {(() => {
+        const filesNeedingAttention = reviewStatuses.filter(
+          (r) => r.status === 'needs-attention' && includedTypes.includes(r.compareType)
+        );
+        
+        if (filesNeedingAttention.length === 0) return null;
+        
+        return (
+          <Card className="border-red-200 bg-red-50/30">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-red-700 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                Files Needing Attention ({filesNeedingAttention.length})
+              </CardTitle>
+              <CardDescription>These files have been marked as requiring attention during review.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {filesNeedingAttention.map((file) => {
+                  // Parse the filePath to extract exercise name and relative path
+                  const [exerciseName, ...pathParts] = file.filePath.split(':');
+                  const relativePath = pathParts.join(':');
+                  
+                  return (
+                    <div
+                      key={`${file.filePath}-${file.variantLabel}`}
+                      className="flex items-center justify-between p-3 rounded-lg border bg-white"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-sm truncate">{relativePath}</span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100">{exerciseName}</span>
+                          <span>→</span>
+                          <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{file.variantLabel}</span>
+                          <span>•</span>
+                          <span className="capitalize">{file.compareType}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Per-Exercise Stats */}
       {stats.map((exercise) => {
