@@ -964,7 +964,8 @@ app.get('/api/stats', async (_req, res) => {
       const exerciseName = exercise.exerciseName;
       const targetFolder = exercise.targetFolder;
       const variants = exercise.variants;
-      const baseVariant = variants[0]?.label || 'Variant 1';
+      const baseVariant = variants[0];
+      const baseVariantLabel = baseVariant?.label || 'Variant 1';
       const compareVariants = variants.slice(1);
       
       // Get reviews for this exercise
@@ -979,10 +980,14 @@ app.get('/api/stats', async (_req, res) => {
       };
       
       // Try to count actual files for each compare type
+      // Use same path structure as compare endpoint: targetRoot/exerciseSlug/baseSlug/folderName
+      const targetRoot = normalizeTargetFolder(targetFolder);
+      const exerciseSlug = slugify(exerciseName, 'exercise');
+      const baseSlug = slugify(baseVariantLabel, 'variant-1');
+      
       const compareTypes = ['test', 'solution', 'template'] as const;
       for (const ct of compareTypes) {
-        const repoKey = ct === 'template' ? 'templateRepo' : ct === 'test' ? 'testRepo' : 'solutionRepo';
-        const baseRepoPath = path.join(ALLOWED_BASE_DIR, targetFolder, baseVariant, repoKey.replace('Repo', ''));
+        const baseRepoPath = path.join(targetRoot, exerciseSlug, baseSlug, ct);
         
         try {
           if (await fs.pathExists(baseRepoPath)) {
