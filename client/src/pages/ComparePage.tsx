@@ -637,16 +637,41 @@ function ComparePage() {
 
     // Handle new file-centric format with line diff
     if (comparison.fileComparisons && comparison.variantLabels) {
-      if (comparison.fileComparisons.length === 0) {
-        return <p className="text-sm text-muted-foreground">No differences detected.</p>;
-      }
-
       const totalVariants = comparison.variantLabels.length;
       const canSwitchVariant = totalVariants > 1;
       const currentVariantLabel = comparison.variantLabels[activeVariantIndex] || '';
 
-      // Calculate review stats
-      const reviewStats = comparison.fileComparisons.reduce(
+      // Filter to only show files where the current variant has actual differences
+      const filesWithDifferencesForVariant = comparison.fileComparisons.filter((fileComp) => {
+        const variant = fileComp.variants[activeVariantIndex];
+        return variant?.hasDifference === true;
+      });
+
+      if (filesWithDifferencesForVariant.length === 0) {
+        return (
+          <>
+            <p className="text-sm text-muted-foreground">No differences detected for this variant.</p>
+            {/* Floating variant switcher button */}
+            {canSwitchVariant && (
+              <div className="fixed bottom-6 right-6 z-50">
+                <Button
+                  onClick={() => setActiveVariantIndex((prev) => (prev + 1) % totalVariants)}
+                  className="shadow-lg rounded-full h-14 px-6 text-base font-semibold"
+                  size="lg"
+                >
+                  Comparing: {comparison.variantLabels[activeVariantIndex]}
+                  <span className="ml-2 text-xs opacity-70">
+                    ({activeVariantIndex + 1}/{totalVariants})
+                  </span>
+                </Button>
+              </div>
+            )}
+          </>
+        );
+      }
+
+      // Calculate review stats only for files with actual differences
+      const reviewStats = filesWithDifferencesForVariant.reduce(
         (acc, fileComp) => {
           const key = getReviewKey(fileComp.relativePath, currentVariantLabel);
           const status = reviewStatuses[key] || 'unchecked';
@@ -676,7 +701,7 @@ function ComparePage() {
           </div>
 
           <div className="space-y-6">
-            {comparison.fileComparisons
+            {filesWithDifferencesForVariant
               .filter((fileComp) => {
                 if (showFilter === 'all') return true;
                 const reviewKey = getReviewKey(fileComp.relativePath, currentVariantLabel);
@@ -704,7 +729,7 @@ function ComparePage() {
               );
             })}
             {/* Show message when filter returns no results */}
-            {comparison.fileComparisons.filter((fileComp) => {
+            {filesWithDifferencesForVariant.filter((fileComp) => {
               if (showFilter === 'all') return true;
               const reviewKey = getReviewKey(fileComp.relativePath, currentVariantLabel);
               const status = reviewStatuses[reviewKey] || 'unchecked';

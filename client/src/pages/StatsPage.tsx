@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { API_BASE } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import type { CompareType, FileReview } from '@/types';
 
 type CompareTypeStats = {
@@ -39,46 +41,71 @@ function StatsPage() {
   const [error, setError] = useState<string | null>(null);
   const [includedTypes, setIncludedTypes] = useState<CompareType[]>(allCompareTypes);
   const [reviewStatuses, setReviewStatuses] = useState<FileReview[]>([]);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
+
+  // Function to fetch data (extracted so we can call it after clearing)
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch stats, included types, and review statuses in parallel
+      const [statsRes, typesRes, reviewRes] = await Promise.all([
+        fetch(`${API_BASE}/api/stats`),
+        fetch(`${API_BASE}/api/stats-included-types`),
+        fetch(`${API_BASE}/api/review-status`),
+      ]);
+      
+      const statsData: StatsResponse = await statsRes.json();
+      const typesData = await typesRes.json();
+      const reviewData = await reviewRes.json();
+      
+      if (statsData.ok) {
+        setStats(statsData.stats);
+      } else {
+        setError('Failed to load stats');
+      }
+      
+      if (typesData.ok && typesData.statsIncludedTypes) {
+        setIncludedTypes(typesData.statsIncludedTypes);
+      }
+      
+      if (reviewData.ok && reviewData.reviewStatuses) {
+        setReviewStatuses(reviewData.reviewStatuses);
+      }
+    } catch (err) {
+      setError('Failed to fetch stats');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Fetch stats, included types, and review statuses
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        
-        // Fetch stats, included types, and review statuses in parallel
-        const [statsRes, typesRes, reviewRes] = await Promise.all([
-          fetch(`${API_BASE}/api/stats`),
-          fetch(`${API_BASE}/api/stats-included-types`),
-          fetch(`${API_BASE}/api/review-status`),
-        ]);
-        
-        const statsData: StatsResponse = await statsRes.json();
-        const typesData = await typesRes.json();
-        const reviewData = await reviewRes.json();
-        
-        if (statsData.ok) {
-          setStats(statsData.stats);
-        } else {
-          setError('Failed to load stats');
-        }
-        
-        if (typesData.ok && typesData.statsIncludedTypes) {
-          setIncludedTypes(typesData.statsIncludedTypes);
-        }
-        
-        if (reviewData.ok && reviewData.reviewStatuses) {
-          setReviewStatuses(reviewData.reviewStatuses);
-        }
-      } catch (err) {
-        setError('Failed to fetch stats');
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchData();
   }, []);
+
+  // Clear all review statuses
+  const handleClearAllStats = async () => {
+    try {
+      setIsClearing(true);
+      const response = await fetch(`${API_BASE}/api/review-status`, {
+        method: 'DELETE',
+      });
+      const data = await response.json();
+      if (data.ok) {
+        // Refresh the data
+        await fetchData();
+      } else {
+        console.error('Failed to clear stats:', data.error);
+      }
+    } catch (err) {
+      console.error('Failed to clear stats:', err);
+    } finally {
+      setIsClearing(false);
+    }
+  };
 
   // Toggle a compare type and save to server
   const toggleIncludedType = async (type: CompareType) => {
@@ -145,10 +172,42 @@ function StatsPage() {
   return (
     <div className="flex flex-col gap-6">
       <header className="space-y-2">
-        <p className="text-sm font-medium tracking-widest text-muted-foreground">Statistics</p>
-        <h1 className="text-3xl font-semibold tracking-tight">Review Progress</h1>
-        <p className="text-muted-foreground">Track your review progress across all exercises and comparison types.</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-sm font-medium tracking-widest text-muted-foreground">Statistics</p>
+            <h1 className="text-3xl font-semibold tracking-tight">Review Progress</h1>
+            <p className="text-muted-foreground mt-2">Track your review progress across all exercises and comparison types.</p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowClearConfirm(true)}
+            disabled={isClearing || reviewStatuses.length === 0}
+            className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+              <path d="M3 6h18"></path>
+              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+              <line x1="10" y1="11" x2="10" y2="17"></line>
+              <line x1="14" y1="11" x2="14" y2="17"></line>
+            </svg>
+            Clear All Stats
+          </Button>
+        </div>
       </header>
+
+      {/* Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showClearConfirm}
+        onClose={() => setShowClearConfirm(false)}
+        onConfirm={handleClearAllStats}
+        title="Clear All Review Stats?"
+        description="This will permanently delete all review progress for all exercises. This action cannot be undone."
+        confirmText="Clear All Stats"
+        cancelText="Cancel"
+        variant="destructive"
+      />
 
       {/* Overall Progress */}
       <Card>

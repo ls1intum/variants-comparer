@@ -1039,6 +1039,18 @@ app.get('/api/review-status', async (_req, res) => {
   }
 });
 
+// Clear all review statuses
+app.delete('/api/review-status', async (_req, res) => {
+  try {
+    const config = await readMultiExerciseConfig();
+    config.reviewStatuses = [];
+    await writeMultiExerciseConfig(config);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: (error as Error).message });
+  }
+});
+
 // Stats included types endpoints
 app.get('/api/stats-included-types', async (_req, res) => {
   try {
@@ -1083,6 +1095,7 @@ app.get('/api/stats', async (_req, res) => {
       const baseVariant = variants[0];
       const baseVariantLabel = baseVariant?.label || 'Variant 1';
       const compareVariants = variants.slice(1);
+      const fileMappings = exercise.fileMappings || [];
       
       // Get reviews for this exercise
       const exerciseReviews = reviewStatuses.filter(r => r.filePath.startsWith(`${exerciseName}:`));
@@ -1106,8 +1119,7 @@ app.get('/api/stats', async (_req, res) => {
         };
       }
       
-      // Try to count actual files for each compare type
-      // Use same path structure as compare endpoint: targetRoot/exerciseSlug/baseSlug/folderName
+      // Count actual files WITH DIFFERENCES for each compare type and variant
       const targetRoot = normalizeTargetFolder(targetFolder);
       const exerciseSlug = slugify(exerciseName, 'exercise');
       const baseSlug = slugify(baseVariantLabel, 'variant-1');
@@ -1118,18 +1130,58 @@ app.get('/api/stats', async (_req, res) => {
         
         try {
           if (await fs.pathExists(baseRepoPath)) {
-            const files = await getJavaFiles(baseRepoPath);
-            // Total = files * number of compare variants
-            const entry = byCompareType[ct];
-            if (entry) {
-              entry.total = files.length * compareVariants.length;
-            }
-            // Per variant total
-            for (const variant of compareVariants) {
+            const baseFiles = await readFilesRecursive(baseRepoPath, baseRepoPath);
+            
+            // For each variant, count files that actually differ
+            for (let i = 0; i < compareVariants.length; i++) {
+              const variant = compareVariants[i];
+              if (!variant) continue;
+              
+              const variantSlug = slugify(variant.label, `variant-${i + 2}`);
+              const variantRepoPath = path.join(targetRoot, exerciseSlug, variantSlug, ct);
+              
+              if (!(await fs.pathExists(variantRepoPath))) continue;
+              
+              const variantFiles = await readFilesRecursive(variantRepoPath, variantRepoPath);
+              
+              // Apply file mappings for this variant
+              const mappedVariantFiles = new Map<string, string>();
+              variantFiles.forEach((content, filePath) => {
+                const mapping = fileMappings.find(
+                  m => m.variantFile === filePath && m.variantLabel === variant.label
+                );
+                if (mapping) {
+                  mappedVariantFiles.set(mapping.baseFile, content);
+                } else {
+                  mappedVariantFiles.set(filePath, content);
+                }
+              });
+              
+              // Count files with actual differences for this variant
+              const allPaths = new Set([...baseFiles.keys(), ...mappedVariantFiles.keys()]);
+              let filesWithDifferences = 0;
+              
+              for (const relPath of allPaths) {
+                const baseContent = baseFiles.get(relPath) ?? '';
+                const variantContent = mappedVariantFiles.get(relPath) ?? '';
+                if (baseContent !== variantContent) {
+                  filesWithDifferences++;
+                }
+              }
+              
+              // Update per-variant total
               const variantEntry = byVariant[variant.label]?.[ct];
               if (variantEntry) {
-                variantEntry.total = files.length;
+                variantEntry.total = filesWithDifferences;
               }
+            }
+            
+            // Overall total = sum of per-variant totals
+            const entry = byCompareType[ct];
+            if (entry) {
+              entry.total = compareVariants.reduce((sum, v) => {
+                return sum + (byVariant[v.label]?.[ct]?.total ?? 0);
+              }, 0);
             }
           }
         } catch {
@@ -1137,15 +1189,27 @@ app.get('/api/stats', async (_req, res) => {
         }
       }
       
-      // Problem statements - 1 per variant to compare
-      if (byCompareType.problem) {
-        byCompareType.problem.total = compareVariants.length;
-      }
-      for (const variant of compareVariants) {
+      // Problem statements - check if they actually differ per variant
+      for (let i = 0; i < compareVariants.length; i++) {
+        const variant = compareVariants[i];
+        if (!variant) continue;
+        
+        // Check if problem statement differs for this variant
+        const baseMarkdown = baseVariant?.markdown || '';
+        const variantMarkdown = variant.markdown || '';
+        const hasDifference = baseMarkdown !== variantMarkdown;
+        
         const variantEntry = byVariant[variant.label]?.problem;
         if (variantEntry) {
-          variantEntry.total = 1;
+          variantEntry.total = hasDifference ? 1 : 0;
         }
+      }
+      
+      // Overall problem total = sum of per-variant totals
+      if (byCompareType.problem) {
+        byCompareType.problem.total = compareVariants.reduce((sum, v) => {
+          return sum + (byVariant[v.label]?.problem?.total ?? 0);
+        }, 0);
       }
       
       // Count reviews (overall and per-variant)
