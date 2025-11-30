@@ -18,6 +18,8 @@ const ALLOWED_BASE_DIR = path.resolve(
 const CONFIG_PATH = path.resolve(
   process.env.CONFIG_PATH ?? path.join(__dirname, '..', 'storage', 'config.json'),
 );
+// Host path for VS Code - when running in Docker, this maps container /data to host path
+const HOST_DATA_PATH = process.env.HOST_DATA_PATH ?? ALLOWED_BASE_DIR;
 
 fs.ensureDirSync(ALLOWED_BASE_DIR);
 fs.ensureDirSync(path.dirname(CONFIG_PATH));
@@ -719,6 +721,86 @@ app.post('/api/compare', async (req, res) => {
       baseVariant: baseVariant.label || 'Variant 1',
       fileComparisons,
       variantLabels: variantFileMaps.map((v) => v.label),
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ ok: false, error: error.flatten() });
+      return;
+    }
+    res.status(500).json({ ok: false, error: (error as Error).message });
+  }
+});
+
+// Get file paths for VS Code diff
+const openVSCodeDiffSchema = z.object({
+  compareType: z.enum(['test', 'solution', 'template']),
+  relativePath: z.string().min(1),
+  variantLabel: z.string().min(1),
+  mappedPath: z.string().optional(), // If there's a file mapping, this is the variant's actual file path
+});
+
+app.post('/api/open-vscode-diff', async (req, res) => {
+  try {
+    const { compareType, relativePath, variantLabel, mappedPath } = openVSCodeDiffSchema.parse(req.body);
+    
+    const multiConfig = await readMultiExerciseConfig();
+    const config = multiConfig.exercises[multiConfig.activeExerciseIndex];
+    
+    if (!config) {
+      res.status(400).json({ ok: false, error: 'No active exercise found.' });
+      return;
+    }
+    
+    const baseVariant = config.variants[0];
+    if (!baseVariant) {
+      res.status(400).json({ ok: false, error: 'No base variant configured.' });
+      return;
+    }
+    
+    const targetRoot = normalizeTargetFolder(config.targetFolder);
+    const exerciseSlug = slugify(config.exerciseName, 'exercise');
+    const baseSlug = slugify(baseVariant.label, 'variant-1');
+    
+    // Find the variant index
+    const variantIndex = config.variants.findIndex(v => v.label === variantLabel);
+    if (variantIndex < 1) {
+      res.status(400).json({ ok: false, error: `Variant "${variantLabel}" not found.` });
+      return;
+    }
+    
+    const variant = config.variants[variantIndex];
+    if (!variant) {
+      res.status(400).json({ ok: false, error: `Variant "${variantLabel}" not found.` });
+      return;
+    }
+    
+    const variantSlug = slugify(variant.label, `variant-${variantIndex + 1}`);
+    
+    // Build absolute paths (these are paths inside the container's /data volume)
+    const baseFilePath = path.join(targetRoot, exerciseSlug, baseSlug, compareType, relativePath);
+    const variantFilePath = path.join(
+      targetRoot, 
+      exerciseSlug, 
+      variantSlug, 
+      compareType, 
+      mappedPath || relativePath
+    );
+    
+    // Check files exist
+    const baseExists = await fs.pathExists(baseFilePath);
+    const variantExists = await fs.pathExists(variantFilePath);
+    
+    // Convert container paths to host paths for VS Code
+    // Replace the container data dir with the host data dir
+    const toHostPath = (containerPath: string) => {
+      return containerPath.replace(ALLOWED_BASE_DIR, HOST_DATA_PATH);
+    };
+    
+    // Return the paths - the client will construct the vscode:// URL
+    res.json({ 
+      ok: true, 
+      baseFilePath: baseExists ? toHostPath(baseFilePath) : null,
+      variantFilePath: variantExists ? toHostPath(variantFilePath) : null,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

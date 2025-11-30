@@ -9,6 +9,7 @@ services:
       - PORT=4000
       - ALLOWED_BASE_DIR=/data
       - CONFIG_PATH=/app/storage/config.json
+      - HOST_DATA_PATH=${PWD}/data
     volumes:
       - ./data:/data
       - ./server/storage:/app/storage

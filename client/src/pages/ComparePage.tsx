@@ -48,7 +48,9 @@ function FileComparisonCard({
   activeVariantIndex,
   fileMappings = [],
   reviewStatus,
-  onReviewStatusChange
+  onReviewStatusChange,
+  compareType,
+  onOpenInVSCode,
 }: { 
   fileComp: FileComparison; 
   baseVariant: string;
@@ -56,6 +58,8 @@ function FileComparisonCard({
   fileMappings?: Array<{ baseFile: string; variantFile: string; variantLabel: string }>;
   reviewStatus: ReviewStatus;
   onReviewStatusChange: (status: ReviewStatus) => void;
+  compareType: CompareType;
+  onOpenInVSCode: (relativePath: string, variantLabel: string, mappedPath?: string) => void;
 }) {
   const baseLines = fileComp.baseContent.split('\n');
   const scrollRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -122,6 +126,9 @@ function FileComparisonCard({
     reviewStatus === 'needs-attention' ? 'border-red-500 border-2' : 
     'border-slate-300';
 
+  // VS Code button is only available for repo comparisons, not markdown
+  const canOpenInVSCode = compareType !== 'problem';
+
   return (
     <Card className={`border ${borderColorClass}`}>
       <CardHeader>
@@ -137,6 +144,16 @@ function FileComparisonCard({
                   <span className="font-mono font-medium">{mapping.variantFile}</span>
                 </span>
               </div>
+            )}
+            {/* VS Code button */}
+            {canOpenInVSCode && selectedVariant && (
+              <button
+                onClick={() => onOpenInVSCode(fileComp.relativePath, selectedVariant.variant, mapping?.variantFile)}
+                className="p-1.5 rounded-md transition-colors hover:bg-blue-50"
+                title="Open in VS Code (new window)"
+              >
+                <img src="/vscode_icon.svg" alt="VS Code" width="16" height="16" />
+              </button>
             )}
             {/* Review status buttons */}
             <div className="flex items-center gap-1 ml-2">
@@ -457,6 +474,51 @@ function ComparePage() {
     }
   }, [getReviewKey, exerciseName, compareType]);
 
+  // Open files in VS Code diff view
+  const handleOpenInVSCode = useCallback(async (relativePath: string, variantLabel: string, mappedPath?: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/open-vscode-diff`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          compareType,
+          relativePath,
+          variantLabel,
+          mappedPath,
+        }),
+      });
+      const data = await response.json();
+      if (!data.ok) {
+        console.error('Failed to get file paths:', data.error);
+        return;
+      }
+      
+      const { baseFilePath, variantFilePath } = data;
+      
+      // Use vscode:// URL scheme to open files in a new window
+      // Adding windowId=_blank opens in a new VS Code window
+      // Format: vscode://file/path?windowId=_blank
+      
+      if (baseFilePath && variantFilePath) {
+        // Open both files in a new VS Code window
+        // First file opens new window, second file opens in same new window
+        window.open(`vscode://file${baseFilePath}?windowId=_blank`, '_blank');
+        
+        // Open second file after a short delay so VS Code processes them in order
+        setTimeout(() => {
+          // Don't use _blank for second file - it should open in the same new window
+          window.open(`vscode://file${variantFilePath}`, '_blank');
+        }, 500);
+      } else if (baseFilePath) {
+        window.open(`vscode://file${baseFilePath}?windowId=_blank`, '_blank');
+      } else if (variantFilePath) {
+        window.open(`vscode://file${variantFilePath}?windowId=_blank`, '_blank');
+      }
+    } catch (error) {
+      console.error('Failed to open VS Code:', error);
+    }
+  }, [compareType]);
+
   // Reset variant index when comparison data changes
   useEffect(() => {
     setActiveVariantIndex(0);
@@ -599,6 +661,8 @@ function ComparePage() {
                   fileMappings={currentExercise.fileMappings || []}
                   reviewStatus={reviewStatus}
                   onReviewStatusChange={(status) => handleReviewStatusChange(fileComp.relativePath, currentVariantLabel, status)}
+                  compareType={compareType}
+                  onOpenInVSCode={handleOpenInVSCode}
                 />
               );
             })}

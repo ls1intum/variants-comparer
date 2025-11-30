@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 
 type ToastType = 'success' | 'error' | 'info';
