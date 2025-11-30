@@ -399,6 +399,7 @@ function ComparePage() {
   const [compareError, setCompareError] = useState<string>('');
   const [activeVariantIndex, setActiveVariantIndex] = useState(0);
   const [reviewStatuses, setReviewStatuses] = useState<Record<string, ReviewStatus>>({});
+  const [showFilter, setShowFilter] = useState<'all' | 'needs-attention' | 'unchecked'>('all');
 
   const exerciseName = currentExercise.exerciseName;
   const targetFolder = currentExercise.targetFolder;
@@ -576,7 +577,16 @@ function ComparePage() {
           </div>
 
           <div className="space-y-6">
-            {comparison.fileComparisons.map((fileComp) => {
+            {comparison.fileComparisons
+              .filter((fileComp) => {
+                if (showFilter === 'all') return true;
+                const reviewKey = getReviewKey(fileComp.relativePath, currentVariantLabel);
+                const status = reviewStatuses[reviewKey] || 'unchecked';
+                if (showFilter === 'needs-attention') return status === 'needs-attention';
+                if (showFilter === 'unchecked') return status === 'unchecked';
+                return true;
+              })
+              .map((fileComp) => {
               const reviewKey = getReviewKey(fileComp.relativePath, currentVariantLabel);
               const reviewStatus = reviewStatuses[reviewKey] || 'unchecked';
               
@@ -592,6 +602,19 @@ function ComparePage() {
                 />
               );
             })}
+            {/* Show message when filter returns no results */}
+            {comparison.fileComparisons.filter((fileComp) => {
+              if (showFilter === 'all') return true;
+              const reviewKey = getReviewKey(fileComp.relativePath, currentVariantLabel);
+              const status = reviewStatuses[reviewKey] || 'unchecked';
+              if (showFilter === 'needs-attention') return status === 'needs-attention';
+              if (showFilter === 'unchecked') return status === 'unchecked';
+              return true;
+            }).length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No files match the current filter.
+              </p>
+            )}
           </div>
           
           {/* Floating variant switcher button */}
@@ -632,7 +655,7 @@ function ComparePage() {
           <CardTitle>Comparison scope</CardTitle>
           <CardDescription>Select the content to diff against Variant 1.</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
             {compareOptions.map((option) => (
               <button
@@ -647,6 +670,41 @@ function ComparePage() {
                 {option.label}
               </button>
             ))}
+          </div>
+          
+          {/* Review status filter */}
+          <div className="flex items-center gap-2 pt-2 border-t">
+            <span className="text-sm text-muted-foreground">Show:</span>
+            <button
+              onClick={() => setShowFilter('all')}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                showFilter === 'all'
+                  ? 'bg-slate-700 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              All files
+            </button>
+            <button
+              onClick={() => setShowFilter('needs-attention')}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                showFilter === 'needs-attention'
+                  ? 'bg-red-600 text-white'
+                  : 'bg-red-50 text-red-700 hover:bg-red-100'
+              }`}
+            >
+              ⚠ Needs attention
+            </button>
+            <button
+              onClick={() => setShowFilter('unchecked')}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                showFilter === 'unchecked'
+                  ? 'bg-amber-600 text-white'
+                  : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+              }`}
+            >
+              Not reviewed
+            </button>
           </div>
         </CardContent>
       </Card>
