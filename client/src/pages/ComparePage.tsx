@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import DiffMatchPatch from 'diff-match-patch';
 
 import { API_BASE } from '@/lib/api';
@@ -7,6 +7,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useExercise } from '@/contexts/ExerciseContext';
+
+// Review status types
+type ReviewStatus = 'unchecked' | 'correct' | 'needs-attention';
 
 const compareOptions: { value: CompareType; label: string }[] = [
   { value: 'problem', label: 'Problem Statement (Markdown)' },
@@ -47,12 +50,16 @@ function FileComparisonCard({
   fileComp, 
   baseVariant, 
   activeVariantIndex,
-  fileMappings = []
+  fileMappings = [],
+  reviewStatus,
+  onReviewStatusChange
 }: { 
   fileComp: FileComparison; 
   baseVariant: string;
   activeVariantIndex: number;
   fileMappings?: Array<{ baseFile: string; variantFile: string; variantLabel: string }>;
+  reviewStatus: ReviewStatus;
+  onReviewStatusChange: (status: ReviewStatus) => void;
 }) {
   const baseLines = fileComp.baseContent.split('\n');
   const scrollRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -114,21 +121,59 @@ function FileComparisonCard({
     return null;
   }
 
+  const borderColorClass = 
+    reviewStatus === 'correct' ? 'border-green-500 border-2' : 
+    reviewStatus === 'needs-attention' ? 'border-red-500 border-2' : 
+    'border-slate-300';
+
   return (
-    <Card className="border border-slate-300">
+    <Card className={`border ${borderColorClass}`}>
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
           <CardTitle className="text-base font-mono flex-1">{fileComp.relativePath}</CardTitle>
-          {mapping && (
-            <div className="flex items-center gap-2 text-xs shrink-0">
-              <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
-                Mapped
-              </span>
-              <span className="text-muted-foreground">
-                <span className="font-mono font-medium">{mapping.variantFile}</span>
-              </span>
+          <div className="flex items-center gap-2 shrink-0">
+            {mapping && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
+                  Mapped
+                </span>
+                <span className="text-muted-foreground">
+                  <span className="font-mono font-medium">{mapping.variantFile}</span>
+                </span>
+              </div>
+            )}
+            {/* Review status buttons */}
+            <div className="flex items-center gap-1 ml-2">
+              <button
+                onClick={() => onReviewStatusChange(reviewStatus === 'correct' ? 'unchecked' : 'correct')}
+                className={`p-1.5 rounded-md transition-colors ${
+                  reviewStatus === 'correct' 
+                    ? 'bg-green-100 text-green-700 ring-1 ring-green-500' 
+                    : 'hover:bg-green-50 text-slate-400 hover:text-green-600'
+                }`}
+                title="Mark as correct / aligned"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+              </button>
+              <button
+                onClick={() => onReviewStatusChange(reviewStatus === 'needs-attention' ? 'unchecked' : 'needs-attention')}
+                className={`p-1.5 rounded-md transition-colors ${
+                  reviewStatus === 'needs-attention' 
+                    ? 'bg-red-100 text-red-700 ring-1 ring-red-500' 
+                    : 'hover:bg-red-50 text-slate-400 hover:text-red-600'
+                }`}
+                title="Mark as needs attention / doesn't align"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="12" y1="8" x2="12" y2="12"></line>
+                  <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+              </button>
             </div>
-          )}
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -350,6 +395,22 @@ function FileComparisonCard({
   );
 }
 
+// Helper to get/set review status from localStorage
+const REVIEW_STORAGE_KEY = 'file-review-status';
+
+function getStoredReviews(): Record<string, ReviewStatus> {
+  try {
+    const stored = localStorage.getItem(REVIEW_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+}
+
+function setStoredReviews(reviews: Record<string, ReviewStatus>) {
+  localStorage.setItem(REVIEW_STORAGE_KEY, JSON.stringify(reviews));
+}
+
 function ComparePage() {
   const { currentExercise, activeExerciseIndex, isSaving } = useExercise();
   const [compareType, setCompareType] = useState<CompareType>('problem');
@@ -357,9 +418,25 @@ function ComparePage() {
   const [compareStatus, setCompareStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [compareError, setCompareError] = useState<string>('');
   const [activeVariantIndex, setActiveVariantIndex] = useState(0);
+  const [reviewStatuses, setReviewStatuses] = useState<Record<string, ReviewStatus>>(() => getStoredReviews());
 
   const exerciseName = currentExercise.exerciseName;
   const targetFolder = currentExercise.targetFolder;
+
+  // Generate a unique key for a file's review status
+  const getReviewKey = useCallback((relativePath: string, variantLabel: string) => {
+    return `${exerciseName}:${compareType}:${relativePath}:${variantLabel}`;
+  }, [exerciseName, compareType]);
+
+  // Update review status for a file
+  const handleReviewStatusChange = useCallback((relativePath: string, variantLabel: string, status: ReviewStatus) => {
+    const key = getReviewKey(relativePath, variantLabel);
+    setReviewStatuses(prev => {
+      const updated = { ...prev, [key]: status };
+      setStoredReviews(updated);
+      return updated;
+    });
+  }, [getReviewKey]);
 
   // Reset variant index when comparison data changes
   useEffect(() => {
@@ -448,19 +525,55 @@ function ComparePage() {
 
       const totalVariants = comparison.variantLabels.length;
       const canSwitchVariant = totalVariants > 1;
+      const currentVariantLabel = comparison.variantLabels[activeVariantIndex] || '';
+
+      // Calculate review stats
+      const reviewStats = comparison.fileComparisons.reduce(
+        (acc, fileComp) => {
+          const key = getReviewKey(fileComp.relativePath, currentVariantLabel);
+          const status = reviewStatuses[key] || 'unchecked';
+          acc[status]++;
+          return acc;
+        },
+        { unchecked: 0, correct: 0, 'needs-attention': 0 } as Record<ReviewStatus, number>
+      );
 
       return (
         <>
+          {/* Review progress summary */}
+          <div className="flex items-center gap-4 text-sm">
+            <span className="text-muted-foreground">Review progress:</span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-3 h-3 rounded-full bg-green-500"></span>
+              <span className="text-green-700 font-medium">{reviewStats.correct} correct</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-3 h-3 rounded-full bg-red-500"></span>
+              <span className="text-red-700 font-medium">{reviewStats['needs-attention']} need attention</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-3 h-3 rounded-full bg-slate-300"></span>
+              <span className="text-slate-600">{reviewStats.unchecked} unchecked</span>
+            </span>
+          </div>
+
           <div className="space-y-6">
-            {comparison.fileComparisons.map((fileComp) => (
-              <FileComparisonCard 
-                key={fileComp.relativePath} 
-                fileComp={fileComp} 
-                baseVariant={comparison.baseVariant}
-                activeVariantIndex={activeVariantIndex}
-                fileMappings={currentExercise.fileMappings || []}
-              />
-            ))}
+            {comparison.fileComparisons.map((fileComp) => {
+              const reviewKey = getReviewKey(fileComp.relativePath, currentVariantLabel);
+              const reviewStatus = reviewStatuses[reviewKey] || 'unchecked';
+              
+              return (
+                <FileComparisonCard 
+                  key={fileComp.relativePath} 
+                  fileComp={fileComp} 
+                  baseVariant={comparison.baseVariant}
+                  activeVariantIndex={activeVariantIndex}
+                  fileMappings={currentExercise.fileMappings || []}
+                  reviewStatus={reviewStatus}
+                  onReviewStatusChange={(status) => handleReviewStatusChange(fileComp.relativePath, currentVariantLabel, status)}
+                />
+              );
+            })}
           </div>
           
           {/* Floating variant switcher button */}
