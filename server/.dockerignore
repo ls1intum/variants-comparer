@@ -2,3 +2,4 @@ node_modules
 dist
 npm-debug.log
 storage/config.json
+storage/config.json.backup
