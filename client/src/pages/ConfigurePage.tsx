@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useState, useRef, type ChangeEvent } from 'react';
 
 import { API_BASE } from '@/lib/api';
 import type { DownloadResult, VariantForm, MultiExerciseConfig, FileMapping } from '@/types';
@@ -23,7 +23,7 @@ const toErrorMessage = (error: unknown) => {
 };
 
 function ConfigurePage() {
-  const { exercises, activeExerciseIndex, setExercises, currentExercise } = useExercise();
+  const { exercises, activeExerciseIndex, setExercises, currentExercise, setActiveExerciseIndex } = useExercise();
   const { addToast } = useToast();
   const [results, setResults] = useState<DownloadResult[]>([]);
   const [loading, setLoading] = useState<'save' | 'download' | null>(null);
@@ -34,6 +34,8 @@ function ConfigurePage() {
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [suggestions, setSuggestions] = useState<Array<{ baseFile: string; variantFile: string; variantLabel: string; similarity: number }>>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [exportName, setExportName] = useState('config-backup');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Reset local state when switching exercises
   useEffect(() => {
@@ -49,6 +51,76 @@ function ConfigurePage() {
   const targetFolder = currentExercise.targetFolder;
   const exerciseName = currentExercise.exerciseName;
   const fileMappings = currentExercise.fileMappings || [];
+
+  // Export config to JSON file
+  const handleExport = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/config`);
+      const data = await response.json();
+      if (!data.ok) {
+        throw new Error('Failed to fetch config');
+      }
+      
+      const config = data.data;
+      const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      const filename = `${exportName}-${date}.json`;
+      
+      const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      addToast(`Config exported as ${filename}`, 'success');
+    } catch (error) {
+      addToast(`Export failed: ${toErrorMessage(error)}`, 'error');
+    }
+  };
+
+  // Import config from JSON file
+  const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const config: MultiExerciseConfig = JSON.parse(text);
+      
+      // Validate basic structure
+      if (!config.exercises || !Array.isArray(config.exercises)) {
+        throw new Error('Invalid config format: missing exercises array');
+      }
+      
+      // Save to server
+      const response = await fetch(`${API_BASE}/api/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error ?? 'Failed to save imported config');
+      }
+      
+      // Update local state
+      setExercises(config.exercises);
+      setActiveExerciseIndex(config.activeExerciseIndex || 0);
+      
+      addToast(`Config imported from ${file.name}`, 'success');
+    } catch (error) {
+      addToast(`Import failed: ${toErrorMessage(error)}`, 'error');
+    }
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
 
   const handleVariantChange = (index: number, field: keyof VariantForm, value: string) => {
     setExercises((prev) => prev.map((ex, exIdx) => {
@@ -300,6 +372,62 @@ function ConfigurePage() {
           subdirectories.
         </p>
       </header>
+
+      {/* Import/Export Section */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Import / Export Configuration</CardTitle>
+          <CardDescription>Backup or restore your configuration including all exercises and review statuses.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-end gap-4">
+            {/* Export */}
+            <div className="flex items-end gap-2">
+              <div className="space-y-1">
+                <Label htmlFor="exportName" className="text-xs">Export filename</Label>
+                <Input
+                  id="exportName"
+                  value={exportName}
+                  onChange={(e) => setExportName(e.target.value)}
+                  placeholder="config-backup"
+                  className="w-48 h-9"
+                />
+              </div>
+              <Button onClick={handleExport} variant="outline" size="sm">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Export
+              </Button>
+            </div>
+
+            <div className="h-9 w-px bg-border" />
+
+            {/* Import */}
+            <div className="flex items-end gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleImport}
+                className="hidden"
+                id="config-import"
+              />
+              <Button onClick={() => fileInputRef.current?.click()} variant="outline" size="sm">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                Import
+              </Button>
+              <span className="text-xs text-muted-foreground">Select a .json file</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="rounded-md border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-primary">
         <strong>Important:</strong> Variant 1 is treated as the source of truth for <span className="font-semibold">{exerciseName || 'this exercise'}</span>. Keep its repositories and notes authoritative;
