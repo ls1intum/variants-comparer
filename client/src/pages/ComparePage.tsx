@@ -2,14 +2,11 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import DiffMatchPatch from 'diff-match-patch';
 
 import { API_BASE } from '@/lib/api';
-import type { CompareType, ComparisonResponse, FileComparison } from '@/types';
+import type { CompareType, ComparisonResponse, FileComparison, ReviewStatus } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useExercise } from '@/contexts/ExerciseContext';
-
-// Review status types
-type ReviewStatus = 'unchecked' | 'correct' | 'needs-attention';
 
 const compareOptions: { value: CompareType; label: string }[] = [
   { value: 'problem', label: 'Problem Statement (Markdown)' },
@@ -395,22 +392,6 @@ function FileComparisonCard({
   );
 }
 
-// Helper to get/set review status from localStorage
-const REVIEW_STORAGE_KEY = 'file-review-status';
-
-function getStoredReviews(): Record<string, ReviewStatus> {
-  try {
-    const stored = localStorage.getItem(REVIEW_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
-}
-
-function setStoredReviews(reviews: Record<string, ReviewStatus>) {
-  localStorage.setItem(REVIEW_STORAGE_KEY, JSON.stringify(reviews));
-}
-
 function ComparePage() {
   const { currentExercise, activeExerciseIndex, isSaving } = useExercise();
   const [compareType, setCompareType] = useState<CompareType>('problem');
@@ -418,25 +399,63 @@ function ComparePage() {
   const [compareStatus, setCompareStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [compareError, setCompareError] = useState<string>('');
   const [activeVariantIndex, setActiveVariantIndex] = useState(0);
-  const [reviewStatuses, setReviewStatuses] = useState<Record<string, ReviewStatus>>(() => getStoredReviews());
+  const [reviewStatuses, setReviewStatuses] = useState<Record<string, ReviewStatus>>({});
 
   const exerciseName = currentExercise.exerciseName;
   const targetFolder = currentExercise.targetFolder;
 
+  // Fetch review statuses from server
+  useEffect(() => {
+    const fetchReviewStatuses = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/review-status`);
+        const data = await response.json();
+        if (data.ok && data.reviewStatuses) {
+          // Convert array to map for easier lookup
+          const statusMap: Record<string, ReviewStatus> = {};
+          for (const review of data.reviewStatuses) {
+            // Key format: exerciseName:filePath + compareType + variantLabel
+            const key = `${review.filePath}:${review.compareType}:${review.variantLabel}`;
+            statusMap[key] = review.status;
+          }
+          setReviewStatuses(statusMap);
+        }
+      } catch (error) {
+        console.error('Failed to fetch review statuses:', error);
+      }
+    };
+    fetchReviewStatuses();
+  }, []);
+
   // Generate a unique key for a file's review status
   const getReviewKey = useCallback((relativePath: string, variantLabel: string) => {
-    return `${exerciseName}:${compareType}:${relativePath}:${variantLabel}`;
+    return `${exerciseName}:${relativePath}:${compareType}:${variantLabel}`;
   }, [exerciseName, compareType]);
 
-  // Update review status for a file
-  const handleReviewStatusChange = useCallback((relativePath: string, variantLabel: string, status: ReviewStatus) => {
+  // Update review status for a file - save to server
+  const handleReviewStatusChange = useCallback(async (relativePath: string, variantLabel: string, status: ReviewStatus) => {
     const key = getReviewKey(relativePath, variantLabel);
-    setReviewStatuses(prev => {
-      const updated = { ...prev, [key]: status };
-      setStoredReviews(updated);
-      return updated;
-    });
-  }, [getReviewKey]);
+    
+    // Optimistically update local state
+    setReviewStatuses(prev => ({ ...prev, [key]: status }));
+    
+    // Save to server
+    try {
+      await fetch(`${API_BASE}/api/review-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          exerciseName,
+          filePath: relativePath,
+          variantLabel,
+          compareType,
+          status,
+        }),
+      });
+    } catch (error) {
+      console.error('Failed to save review status:', error);
+    }
+  }, [getReviewKey, exerciseName, compareType]);
 
   // Reset variant index when comparison data changes
   useEffect(() => {

@@ -1,0 +1,232 @@
+import { useEffect, useState } from 'react';
+import { API_BASE } from '@/lib/api';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+
+type CompareTypeStats = {
+  correct: number;
+  needsAttention: number;
+  total: number;
+};
+
+type ExerciseStats = {
+  exerciseName: string;
+  targetFolder: string;
+  variants: string[];
+  byCompareType: Record<string, CompareTypeStats>;
+  totalReviewed: number;
+};
+
+type StatsResponse = {
+  ok: boolean;
+  stats: ExerciseStats[];
+};
+
+const compareTypeLabels: Record<string, string> = {
+  problem: 'Problem Statements',
+  test: 'Test Repositories',
+  solution: 'Solution Repositories',
+  template: 'Template Repositories',
+};
+
+function StatsPage() {
+  const [stats, setStats] = useState<ExerciseStats[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(`${API_BASE}/api/stats`);
+        const data: StatsResponse = await response.json();
+        if (data.ok) {
+          setStats(data.stats);
+        } else {
+          setError('Failed to load stats');
+        }
+      } catch (err) {
+        setError('Failed to fetch stats');
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchStats();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-6">
+        <header className="space-y-2">
+          <p className="text-sm font-medium tracking-widest text-muted-foreground">Statistics</p>
+          <h1 className="text-3xl font-semibold tracking-tight">Review Progress</h1>
+        </header>
+        <p className="text-muted-foreground">Loading stats...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col gap-6">
+        <header className="space-y-2">
+          <p className="text-sm font-medium tracking-widest text-muted-foreground">Statistics</p>
+          <h1 className="text-3xl font-semibold tracking-tight">Review Progress</h1>
+        </header>
+        <p className="text-red-600">{error}</p>
+      </div>
+    );
+  }
+
+  // Calculate overall stats
+  const overallStats = stats.reduce(
+    (acc, exercise) => {
+      Object.values(exercise.byCompareType).forEach(ct => {
+        acc.correct += ct.correct;
+        acc.needsAttention += ct.needsAttention;
+        acc.total += ct.total;
+      });
+      return acc;
+    },
+    { correct: 0, needsAttention: 0, total: 0 }
+  );
+
+  const overallReviewed = overallStats.correct + overallStats.needsAttention;
+  const overallProgress = overallStats.total > 0 ? (overallReviewed / overallStats.total) * 100 : 0;
+
+  return (
+    <div className="flex flex-col gap-6">
+      <header className="space-y-2">
+        <p className="text-sm font-medium tracking-widest text-muted-foreground">Statistics</p>
+        <h1 className="text-3xl font-semibold tracking-tight">Review Progress</h1>
+        <p className="text-muted-foreground">Track your review progress across all exercises and comparison types.</p>
+      </header>
+
+      {/* Overall Progress */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Overall Progress</CardTitle>
+          <CardDescription>Combined progress across all exercises</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between text-sm">
+              <span>
+                {overallReviewed} of {overallStats.total} files reviewed
+              </span>
+              <span className="font-medium">{Math.round(overallProgress)}%</span>
+            </div>
+            <Progress value={overallProgress} className="h-3" />
+            <div className="flex gap-6 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-3 h-3 rounded-full bg-green-500"></span>
+                <span className="text-green-700 font-medium">{overallStats.correct} correct</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-3 h-3 rounded-full bg-red-500"></span>
+                <span className="text-red-700 font-medium">{overallStats.needsAttention} need attention</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-3 h-3 rounded-full bg-slate-300"></span>
+                <span className="text-slate-600">{overallStats.total - overallReviewed} remaining</span>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Per-Exercise Stats */}
+      {stats.map((exercise) => {
+        const exerciseTotal = Object.values(exercise.byCompareType).reduce((sum, ct) => sum + ct.total, 0);
+        const exerciseReviewed = Object.values(exercise.byCompareType).reduce(
+          (sum, ct) => sum + ct.correct + ct.needsAttention,
+          0
+        );
+        const exerciseProgress = exerciseTotal > 0 ? (exerciseReviewed / exerciseTotal) * 100 : 0;
+        const exerciseCorrect = Object.values(exercise.byCompareType).reduce((sum, ct) => sum + ct.correct, 0);
+        const exerciseNeedsAttention = Object.values(exercise.byCompareType).reduce(
+          (sum, ct) => sum + ct.needsAttention,
+          0
+        );
+
+        return (
+          <Card key={exercise.exerciseName}>
+            <CardHeader>
+              <div className="flex items-start justify-between">
+                <div>
+                  <CardTitle>{exercise.exerciseName}</CardTitle>
+                  <CardDescription className="font-mono text-xs mt-1">{exercise.targetFolder}</CardDescription>
+                </div>
+                <div className="text-right">
+                  <span className="text-2xl font-bold">{Math.round(exerciseProgress)}%</span>
+                  <p className="text-xs text-muted-foreground">reviewed</p>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                {/* Exercise-level summary */}
+                <div className="space-y-2">
+                  <Progress value={exerciseProgress} className="h-2" />
+                  <div className="flex gap-4 text-xs">
+                    <span className="text-green-700">✓ {exerciseCorrect} correct</span>
+                    <span className="text-red-600">⚠ {exerciseNeedsAttention} need attention</span>
+                    <span className="text-slate-500">{exerciseTotal - exerciseReviewed} remaining</span>
+                  </div>
+                </div>
+
+                {/* Per compare type breakdown */}
+                <div className="grid gap-4 md:grid-cols-2">
+                  {Object.entries(exercise.byCompareType).map(([type, ct]) => {
+                    const reviewed = ct.correct + ct.needsAttention;
+                    const progress = ct.total > 0 ? (reviewed / ct.total) * 100 : 0;
+                    const remaining = ct.total - reviewed;
+
+                    return (
+                      <div key={type} className="p-4 rounded-lg border bg-slate-50/50">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium text-sm">{compareTypeLabels[type] || type}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {reviewed}/{ct.total}
+                          </span>
+                        </div>
+                        <Progress value={progress} className="h-1.5 mb-2" />
+                        <div className="flex gap-3 text-xs">
+                          {ct.correct > 0 && (
+                            <span className="text-green-700">✓ {ct.correct}</span>
+                          )}
+                          {ct.needsAttention > 0 && (
+                            <span className="text-red-600">⚠ {ct.needsAttention}</span>
+                          )}
+                          {remaining > 0 && (
+                            <span className="text-slate-500">{remaining} left</span>
+                          )}
+                          {ct.total === 0 && (
+                            <span className="text-slate-400 italic">No files</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
+
+      {stats.length === 0 && (
+        <Card>
+          <CardContent className="py-8">
+            <p className="text-center text-muted-foreground">
+              No exercises configured yet. Go to Configure to set up exercises.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+export default StatsPage;

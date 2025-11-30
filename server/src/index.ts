@@ -79,9 +79,19 @@ const payloadSchema = z.object({
   fileMappings: z.array(fileMappingSchema).optional().default([]),
 });
 
+// Review status for file comparisons
+const reviewStatusSchema = z.enum(['unchecked', 'correct', 'needs-attention']);
+const fileReviewSchema = z.object({
+  filePath: z.string(),
+  variantLabel: z.string(),
+  compareType: z.enum(['problem', 'test', 'solution', 'template']),
+  status: reviewStatusSchema,
+});
+
 const multiExerciseConfigSchema = z.object({
   exercises: z.array(payloadSchema).min(1, 'At least one exercise is required'),
   activeExerciseIndex: z.number().int().min(0).default(0),
+  reviewStatuses: z.array(fileReviewSchema).optional().default([]),
 });
 
 const compareTypeSchema = z.enum(['problem', 'test', 'solution', 'template']);
@@ -280,6 +290,7 @@ const defaultConfig: Payload = {
 const defaultMultiExerciseConfig: MultiExerciseConfig = {
   exercises: [defaultConfig],
   activeExerciseIndex: 0,
+  reviewStatuses: [],
 };
 
 function slugify(input: string, fallback: string) {
@@ -338,6 +349,7 @@ async function readMultiExerciseConfig(): Promise<MultiExerciseConfig> {
       return {
         exercises: [single],
         activeExerciseIndex: 0,
+        reviewStatuses: [],
       };
     }
   } catch (err) {
@@ -393,9 +405,13 @@ app.post('/api/save', async (req, res) => {
       };
     });
     
+    // Preserve existing review statuses when saving
+    const existingConfig = await readMultiExerciseConfig();
+    
     const normalizedConfig: MultiExerciseConfig = {
       exercises: normalizedExercises,
       activeExerciseIndex: multiConfig.activeExerciseIndex,
+      reviewStatuses: existingConfig.reviewStatuses || [],
     };
     
     await writeMultiExerciseConfig(normalizedConfig);
@@ -861,6 +877,177 @@ app.get('/api/suggest-mappings', async (req, res) => {
     res.status(500).json({ ok: false, error: (error as Error).message });
   }
 });
+
+// Review status endpoints
+const updateReviewStatusSchema = z.object({
+  exerciseName: z.string(),
+  filePath: z.string(),
+  variantLabel: z.string(),
+  compareType: compareTypeSchema,
+  status: reviewStatusSchema,
+});
+
+app.post('/api/review-status', async (req, res) => {
+  try {
+    const { exerciseName, filePath, variantLabel, compareType, status } = updateReviewStatusSchema.parse(req.body);
+    
+    const config = await readMultiExerciseConfig();
+    const reviewStatuses = config.reviewStatuses || [];
+    
+    // Find existing review for this file/variant/compareType combination
+    const existingIndex = reviewStatuses.findIndex(
+      r => r.filePath === filePath && 
+           r.variantLabel === variantLabel && 
+           r.compareType === compareType
+    );
+    
+    // Also need to associate with exercise - use exerciseName in the key
+    const fullKey = `${exerciseName}:${filePath}`;
+    const existingIndexWithExercise = reviewStatuses.findIndex(
+      r => r.filePath === fullKey && 
+           r.variantLabel === variantLabel && 
+           r.compareType === compareType
+    );
+    
+    const actualIndex = existingIndexWithExercise >= 0 ? existingIndexWithExercise : existingIndex;
+    
+    if (status === 'unchecked') {
+      // Remove the review status if set to unchecked
+      if (actualIndex >= 0) {
+        reviewStatuses.splice(actualIndex, 1);
+      }
+    } else {
+      const newReview = {
+        filePath: fullKey,
+        variantLabel,
+        compareType,
+        status,
+      };
+      
+      if (actualIndex >= 0) {
+        reviewStatuses[actualIndex] = newReview;
+      } else {
+        reviewStatuses.push(newReview);
+      }
+    }
+    
+    config.reviewStatuses = reviewStatuses;
+    await writeMultiExerciseConfig(config);
+    
+    res.json({ ok: true });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ ok: false, error: error.flatten() });
+      return;
+    }
+    res.status(500).json({ ok: false, error: (error as Error).message });
+  }
+});
+
+app.get('/api/review-status', async (_req, res) => {
+  try {
+    const config = await readMultiExerciseConfig();
+    res.json({ ok: true, reviewStatuses: config.reviewStatuses || [] });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: (error as Error).message });
+  }
+});
+
+// Stats endpoint - returns review progress for all exercises
+app.get('/api/stats', async (_req, res) => {
+  try {
+    const config = await readMultiExerciseConfig();
+    const reviewStatuses = config.reviewStatuses || [];
+    
+    // For each exercise, get file counts from disk and compare with reviews
+    const stats = await Promise.all(config.exercises.map(async (exercise) => {
+      const exerciseName = exercise.exerciseName;
+      const targetFolder = exercise.targetFolder;
+      const variants = exercise.variants;
+      const baseVariant = variants[0]?.label || 'Variant 1';
+      const compareVariants = variants.slice(1);
+      
+      // Get reviews for this exercise
+      const exerciseReviews = reviewStatuses.filter(r => r.filePath.startsWith(`${exerciseName}:`));
+      
+      // Count by compareType and status
+      const byCompareType: Record<string, { correct: number; needsAttention: number; total: number }> = {
+        problem: { correct: 0, needsAttention: 0, total: 0 },
+        test: { correct: 0, needsAttention: 0, total: 0 },
+        solution: { correct: 0, needsAttention: 0, total: 0 },
+        template: { correct: 0, needsAttention: 0, total: 0 },
+      };
+      
+      // Try to count actual files for each compare type
+      const compareTypes = ['test', 'solution', 'template'] as const;
+      for (const ct of compareTypes) {
+        const repoKey = ct === 'template' ? 'templateRepo' : ct === 'test' ? 'testRepo' : 'solutionRepo';
+        const baseRepoPath = path.join(ALLOWED_BASE_DIR, targetFolder, baseVariant, repoKey.replace('Repo', ''));
+        
+        try {
+          if (await fs.pathExists(baseRepoPath)) {
+            const files = await getJavaFiles(baseRepoPath);
+            // Total = files * number of compare variants
+            const entry = byCompareType[ct];
+            if (entry) {
+              entry.total = files.length * compareVariants.length;
+            }
+          }
+        } catch {
+          // Ignore errors reading files
+        }
+      }
+      
+      // Problem statements - 1 per variant to compare
+      if (byCompareType.problem) {
+        byCompareType.problem.total = compareVariants.length;
+      }
+      
+      // Count reviews
+      for (const review of exerciseReviews) {
+        const ct = review.compareType;
+        const entry = byCompareType[ct];
+        if (entry) {
+          if (review.status === 'correct') {
+            entry.correct++;
+          } else if (review.status === 'needs-attention') {
+            entry.needsAttention++;
+          }
+        }
+      }
+      
+      return {
+        exerciseName,
+        targetFolder,
+        variants: variants.map(v => v.label),
+        byCompareType,
+        totalReviewed: exerciseReviews.length,
+      };
+    }));
+    
+    res.json({ ok: true, stats });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: (error as Error).message });
+  }
+});
+
+async function getJavaFiles(dir: string): Promise<string[]> {
+  const files: string[] = [];
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory() && !entry.name.startsWith('.')) {
+        files.push(...await getJavaFiles(fullPath));
+      } else if (entry.isFile() && entry.name.endsWith('.java')) {
+        files.push(fullPath);
+      }
+    }
+  } catch {
+    // Ignore errors
+  }
+  return files;
+}
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });

@@ -9,6 +9,7 @@ import { ExerciseSelector } from '@/components/ExerciseSelector';
 const navItems = [
   { to: '/', label: 'Configure' },
   { to: '/compare', label: 'Compare' },
+  { to: '/stats', label: 'Stats' },
 ];
 
 export function SiteHeader() {

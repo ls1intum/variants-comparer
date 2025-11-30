@@ -13,6 +13,15 @@ export type VariantForm = {
   courseLink: string;
 };
 
+export type ReviewStatus = 'unchecked' | 'correct' | 'needs-attention';
+
+export type FileReview = {
+  filePath: string;
+  variantLabel: string;
+  compareType: CompareType;
+  status: ReviewStatus;
+};
+
 export type ExerciseConfig = {
   targetFolder: string;
   exerciseName: string;
@@ -23,6 +32,7 @@ export type ExerciseConfig = {
 export type MultiExerciseConfig = {
   exercises: ExerciseConfig[];
   activeExerciseIndex: number;
+  reviewStatuses?: FileReview[];
 };
 
 export type DownloadResult = {

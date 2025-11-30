@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { SiteHeader } from '@/components/site-header';
 import ComparePage from '@/pages/ComparePage';
 import ConfigurePage from '@/pages/ConfigurePage';
+import StatsPage from '@/pages/StatsPage';
 import { ExerciseProvider } from '@/contexts/ExerciseContext';
 
 function App() {
@@ -15,6 +16,7 @@ function App() {
             <Routes>
               <Route path="/" element={<ConfigurePage />} />
               <Route path="/compare" element={<ComparePage />} />
+              <Route path="/stats" element={<StatsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>
