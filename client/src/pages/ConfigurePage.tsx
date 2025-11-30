@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
 import { useExercise } from '@/contexts/ExerciseContext';
+import { useToast } from '@/contexts/ToastContext';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const formatRepoType = (type: DownloadResult['repoType']) => type.charAt(0).toUpperCase() + type.slice(1);
@@ -23,7 +24,7 @@ const toErrorMessage = (error: unknown) => {
 
 function ConfigurePage() {
   const { exercises, activeExerciseIndex, setExercises, currentExercise } = useExercise();
-  const [status, setStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const { addToast } = useToast();
   const [results, setResults] = useState<DownloadResult[]>([]);
   const [loading, setLoading] = useState<'save' | 'download' | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
@@ -33,6 +34,16 @@ function ConfigurePage() {
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [suggestions, setSuggestions] = useState<Array<{ baseFile: string; variantFile: string; variantLabel: string; similarity: number }>>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+
+  // Reset local state when switching exercises
+  useEffect(() => {
+    setResults([]);
+    setDownloadProgress(0);
+    setShowProgress(false);
+    setCurrentStep('');
+    setAvailableFiles({});
+    setSuggestions([]);
+  }, [activeExerciseIndex]);
 
   const variants = currentExercise.variants;
   const targetFolder = currentExercise.targetFolder;
@@ -120,7 +131,6 @@ function ConfigurePage() {
 
   const handleSave = async () => {
     setLoading('save');
-    setStatus(null);
     try {
       const payload = buildPayload();
       const currentEx = payload.exercises[payload.activeExerciseIndex];
@@ -139,9 +149,9 @@ function ConfigurePage() {
       if (!response.ok || !data?.ok) {
         throw new Error(data?.error ?? 'Could not save configuration');
       }
-      setStatus({ type: 'success', text: 'Configuration saved locally.' });
+      addToast('Configuration saved locally.', 'success');
     } catch (error) {
-      setStatus({ type: 'error', text: `Save failed: ${toErrorMessage(error)}` });
+      addToast(`Save failed: ${toErrorMessage(error)}`, 'error');
     } finally {
       setLoading(null);
     }
@@ -149,7 +159,6 @@ function ConfigurePage() {
 
   const handleDownload = async () => {
     setLoading('download');
-    setStatus(null);
     setResults([]);
     setCurrentStep('');
     let events: DownloadResult[] = [];
@@ -188,9 +197,9 @@ function ConfigurePage() {
       if (data.targetRoot) {
         handleExerciseFieldChange('targetFolder', data.targetRoot);
       }
-      setStatus({ type: 'success', text: 'Repositories downloaded.' });
+      addToast('Repositories downloaded.', 'success');
     } catch (error) {
-      setStatus({ type: 'error', text: `Download failed: ${toErrorMessage(error)}` });
+      addToast(`Download failed: ${toErrorMessage(error)}`, 'error');
     } finally {
       if (!events.length) {
         setDownloadProgress(100);
@@ -597,16 +606,6 @@ function ConfigurePage() {
           </div>
         </CardContent>
       </Card>
-
-      {status && (
-        <div
-          className={`rounded-md border px-4 py-3 text-sm ${
-            status.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-red-200 bg-red-50 text-red-900'
-          }`}
-        >
-          {status.text}
-        </div>
-      )}
 
       {showProgress && (
         <div className="rounded-md border border-border/70 bg-card px-4 py-3 shadow-sm">
