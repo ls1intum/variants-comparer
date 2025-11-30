@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react';
 import { API_BASE } from '@/lib/api';
 import type { ExerciseConfig, MultiExerciseConfig } from '@/types';
@@ -130,7 +131,6 @@ export function ExerciseProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// eslint-disable-next-line react-refresh/only-export-components
 export function useExercise() {
   const context = useContext(ExerciseContext);
   if (context === undefined) {
