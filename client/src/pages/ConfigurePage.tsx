@@ -73,7 +73,8 @@ function ConfigurePage() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Bug fix: Delay URL revocation to ensure download has started
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       
       addToast(`Config exported as ${filename}`, 'success');
     } catch (error) {
@@ -88,7 +89,13 @@ function ConfigurePage() {
 
     try {
       const text = await file.text();
-      const config: MultiExerciseConfig = JSON.parse(text);
+      // Bug fix: Better error message for invalid JSON
+      let config: MultiExerciseConfig;
+      try {
+        config = JSON.parse(text);
+      } catch (parseError) {
+        throw new Error(`Invalid JSON in file: ${parseError instanceof Error ? parseError.message : 'Parse error'}`);
+      }
       
       // Validate basic structure
       if (!config.exercises || !Array.isArray(config.exercises)) {

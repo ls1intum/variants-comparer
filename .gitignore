@@ -6,7 +6,6 @@ server/storage/config.json
 data/*
 !data/.gitkeep
 !data/README.md
-.env
 *.log
 .DS_Store
 server/storage/*.backup

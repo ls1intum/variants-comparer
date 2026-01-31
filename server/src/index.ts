@@ -103,13 +103,9 @@ const compareRequestSchema = z.object({
 });
 
 function computeLineDiff(baseContent: string, variantContent: string) {
-  const baseLines = baseContent.split('\n');
-  const variantLines = variantContent.split('\n');
   const changes = diffLines(baseContent, variantContent);
   
   const result: Array<{ base?: string; variant?: string; type: 'equal' | 'add' | 'remove' | 'modify' }> = [];
-  let baseIdx = 0;
-  let variantIdx = 0;
 
   for (const change of changes) {
     const lines = change.value.split('\n').filter((line, idx, arr) => idx < arr.length - 1 || line !== '');
@@ -118,20 +114,16 @@ function computeLineDiff(baseContent: string, variantContent: string) {
       // Equal lines
       for (const line of lines) {
         result.push({ base: line, variant: line, type: 'equal' });
-        baseIdx++;
-        variantIdx++;
       }
     } else if (change.removed) {
       // Lines removed from base (present in base, not in variant)
       for (const line of lines) {
         result.push({ base: line, type: 'remove' });
-        baseIdx++;
       }
     } else if (change.added) {
       // Lines added in variant (not in base, present in variant)
       for (const line of lines) {
         result.push({ variant: line, type: 'add' });
-        variantIdx++;
       }
     }
   }
@@ -346,6 +338,10 @@ async function readMultiExerciseConfig(): Promise<MultiExerciseConfig> {
     // Try to parse as multi-exercise config first
     try {
       const safe = multiExerciseConfigSchema.parse(parsed);
+      // Bug fix: Ensure activeExerciseIndex is within bounds
+      if (safe.activeExerciseIndex >= safe.exercises.length) {
+        safe.activeExerciseIndex = Math.max(0, safe.exercises.length - 1);
+      }
       return safe;
     } catch {
       // If that fails, try single exercise (legacy format)
@@ -860,18 +856,18 @@ function calculateSimilarity(content1: string, content2: string): number {
   if (!content1 || !content2) return 0;
   
   const changes = diffChars(content1, content2);
-  let totalChars = 0;
   let matchingChars = 0;
   
   for (const change of changes) {
-    const length = change.value.length;
-    totalChars += length;
     if (!change.added && !change.removed) {
-      matchingChars += length;
+      matchingChars += change.value.length;
     }
   }
   
-  return totalChars > 0 ? Math.round((matchingChars / totalChars) * 100) : 0;
+  // Bug fix: Use the larger of the two strings as the denominator
+  // instead of totalChars which double-counts differences
+  const maxLength = Math.max(content1.length, content2.length);
+  return maxLength > 0 ? Math.round((matchingChars / maxLength) * 100) : 0;
 }
 
 app.get('/api/suggest-mappings', async (req, res) => {
@@ -980,27 +976,31 @@ app.post('/api/review-status', async (req, res) => {
     const config = await readMultiExerciseConfig();
     const reviewStatuses = config.reviewStatuses || [];
     
-    // Find existing review for this file/variant/compareType combination
-    const existingIndex = reviewStatuses.findIndex(
-      r => r.filePath === filePath && 
-           r.variantLabel === variantLabel && 
-           r.compareType === compareType
-    );
-    
-    // Also need to associate with exercise - use exerciseName in the key
+    // Bug fix: Always use consistent key format with exerciseName prefix
     const fullKey = `${exerciseName}:${filePath}`;
-    const existingIndexWithExercise = reviewStatuses.findIndex(
+    
+    // Find existing review using the full key format
+    const existingIndex = reviewStatuses.findIndex(
       r => r.filePath === fullKey && 
            r.variantLabel === variantLabel && 
            r.compareType === compareType
     );
     
-    const actualIndex = existingIndexWithExercise >= 0 ? existingIndexWithExercise : existingIndex;
+    // Clean up any legacy entries without the exercise prefix (migration)
+    const legacyIndex = reviewStatuses.findIndex(
+      r => r.filePath === filePath && 
+           !r.filePath.includes(':') &&
+           r.variantLabel === variantLabel && 
+           r.compareType === compareType
+    );
+    if (legacyIndex >= 0) {
+      reviewStatuses.splice(legacyIndex, 1);
+    }
     
     if (status === 'unchecked') {
       // Remove the review status if set to unchecked
-      if (actualIndex >= 0) {
-        reviewStatuses.splice(actualIndex, 1);
+      if (existingIndex >= 0) {
+        reviewStatuses.splice(existingIndex, 1);
       }
     } else {
       const newReview = {
@@ -1010,8 +1010,8 @@ app.post('/api/review-status', async (req, res) => {
         status,
       };
       
-      if (actualIndex >= 0) {
-        reviewStatuses[actualIndex] = newReview;
+      if (existingIndex >= 0) {
+        reviewStatuses[existingIndex] = newReview;
       } else {
         reviewStatuses.push(newReview);
       }

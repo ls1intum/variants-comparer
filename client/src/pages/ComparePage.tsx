@@ -67,6 +67,20 @@ function FileComparisonCard({
   const scrollRefs = useRef<(HTMLDivElement | null)[]>([]);
   const hasScrolledToFirst = useRef(false);
   const [showOpenMenu, setShowOpenMenu] = useState(false);
+  const menuTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
+  // Bug fix: Clear timeout on unmount to prevent memory leak
+  useEffect(() => {
+    return () => {
+      if (menuTimeoutRef.current) {
+        clearTimeout(menuTimeoutRef.current);
+      }
+    };
+  }, []);
+  
+  const handleMenuBlur = useCallback(() => {
+    menuTimeoutRef.current = setTimeout(() => setShowOpenMenu(false), 150);
+  }, []);
   
   // Only show the selected variant
   const selectedVariant = fileComp.variants[activeVariantIndex];
@@ -153,7 +167,7 @@ function FileComparisonCard({
               <div className="relative">
                 <button
                   onClick={() => setShowOpenMenu(!showOpenMenu)}
-                  onBlur={() => setTimeout(() => setShowOpenMenu(false), 150)}
+                  onBlur={handleMenuBlur}
                   className="p-1.5 rounded-md transition-colors hover:bg-blue-50 flex items-center gap-1"
                   title="Open in VS Code"
                 >
@@ -637,6 +651,17 @@ function ComparePage() {
 
     // Handle new file-centric format with line diff
     if (comparison.fileComparisons && comparison.variantLabels) {
+      // Bug fix: Handle empty or invalid variantLabels array
+      if (!comparison.variantLabels.length) {
+        return <p className="text-sm text-muted-foreground">No variant labels found.</p>;
+      }
+      
+      // Reset activeVariantIndex if it's out of bounds
+      if (activeVariantIndex >= comparison.variantLabels.length) {
+        setActiveVariantIndex(0);
+        return null;
+      }
+      
       const totalVariants = comparison.variantLabels.length;
       const canSwitchVariant = totalVariants > 1;
       const currentVariantLabel = comparison.variantLabels[activeVariantIndex] || '';

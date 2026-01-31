@@ -3,319 +3,83 @@
   
   # Exam Variants Comparer
 
-  A two-service setup (Express API + React + shadcn/ui client) that lets you capture three exam variants, store their repository links, download them into a structured folder tree, and keep accompanying markdown notes. Everything is dockerized with a persistent host folder for the cloned repositories.
+  A tool to manage and compare multiple variants of exam exercises with test, solution, and template repositories.
 </div>
 
 ## What is this tool?
 
-The **Exam Variants Comparer** helps you manage and compare multiple variants of exam exercises. It's designed for instructors or teaching assistants who need to:
+The **Exam Variants Comparer** helps you manage and compare multiple variants of exam exercises:
 
-- **Organize exam variants**: Each exercise can have up to 3 variants (e.g., different exam groups), each with test, solution, and template repositories
-- **Clone repositories automatically**: Download all repositories in one click with proper folder organization
-- **Compare code differences**: Side-by-side view to check differences between variants
+- **Organize variants**: Handle up to 3 variants per exercise, each with test, solution, and template repositories
+- **Clone automatically**: Download all repositories in one click with proper folder organization
+- **Compare differences**: Side-by-side view to check differences between variants
 - **Track review progress**: Mark files as reviewed, correct, or needing attention
-- **Keep notes**: Attach markdown notes to each variant (e.g., problem statements)
-
-## Features
-- 🎨 **Modern UI**: React + Vite + shadcn/ui for a clean, responsive interface
-- 📝 **Variant Management**: Handle three variants (test, solution, template) with repository links and markdown notes
-- 🔄 **Comparison View**: Side-by-side review of all variants before distribution
-- 📥 **Automated Downloads**: One-click repository cloning with progress indicators
-- 💾 **Persistent Storage**: Save/load configurations to JSON
-- 🔒 **Security**: Server-side validation ensures downloads stay within designated directories
-- 🐳 **Docker Ready**: Complete Docker Compose setup with volume mapping
-- 📚 **Course Integration**: Optional course-management links per variant
-
-## Table of Contents
-- [What is this tool?](#what-is-this-tool)
-- [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
-- [User Guide](#user-guide)
-- [Running with Docker](#running-with-docker-recommended)
-- [Local Development](#local-development-without-docker)
-- [Project Structure](#project-structure)
-- [API Summary](#api-summary)
-- [Configuration](#configuration)
-- [Troubleshooting](#troubleshooting)
-
-## Prerequisites
-- Docker & Docker Compose v2
-- Git (for repository cloning)
-- Access to the repositories you want to clone
-- Node.js 18+ and npm (for local development without Docker)
+- **Keep notes**: Attach markdown notes to each variant
 
 ## Quick Start
 
-The fastest way to get started:
-
 ```bash
-# Clone the tool repository
+# Clone and start
 git clone https://github.com/ls1intum/variants-comparer.git
 cd variants-comparer
+./start.sh  # or start.bat on Windows
 
-# Start with Docker
-./start.sh
-
-# Open your browser
-# Client: http://localhost:3003
-# API: http://localhost:4000
+# Open browser at http://localhost:3003
 ```
 
 ## User Guide
 
-### Getting Started
+### 1. Configure an Exercise
 
-1. **Open the application** at http://localhost:3003
-2. You'll see the **Configure** page where you can set up your exercises
+1. **Target Folder**: Where repositories should be saved (e.g., `my-exercises`)
+2. **Exercise Name**: Name your exercise (e.g., `exercise-1`)
+3. **Configure Variants** (1-3):
+   - **Variant Label**: e.g., "variant-a", "variant-b", "variant-c"
+   - **Repository URLs**: Template, Solution, and Test repos
+   - **Notes**: Markdown notes for each variant
 
-### Step 1: Configure an Exercise
+> ⚠️ **For private repos**: Use token URLs: `https://<TOKEN>@github.com/org/repo.git`
 
-1. **Target Folder**: Enter where repositories should be saved (e.g., `exam-variants`)
-2. **Exercise Name**: Give your exercise a name (e.g., `e03` or `Birthday Problem`)
-3. **Configure each Variant** (1, 2, 3):
-   - **Variant Label**: A name for this variant (e.g., "birthday", "carnival", "easter")
-   - **Course Link**: Optional link to your course management system
-   - **Repository URLs**: Enter the Git URLs for:
-     - **Template Repo**: Starting code given to students
-     - **Solution Repo**: Reference solution
-     - **Test Repo**: Test cases
-   - **Notes**: Markdown notes for this variant (problem statement, hints, etc.)
+### 2. Download & Compare
 
-> ⚠️ **Important**: For private repositories, you must use URLs with embedded Personal Access Tokens:
-> 
-> ```
-> https://<YOUR_GITHUB_TOKEN>@github.com/org/repo.git
-> ```
-> 
-> Do NOT use plain HTTPS URLs or SSH URLs - token-based authentication is required for the cloning to work.
+- Click **Save Links** to persist configuration
+- Click **Download** to clone all repositories
+- Navigate to **Compare** page to review differences
+- Use **File Mapping** for files with different names/paths across variants
 
-### Step 2: Save Your Configuration
+## File Mapping & Organization
 
-Click **Save Links** to persist your configuration. This saves your setup to `server/storage/config.json`.
-
-### Step 3: Download Repositories
-
-Click **Download** to clone all configured repositories. Progress is shown for each clone operation.
-
-### Step 4: Compare Variants
-
-Navigate to the **Compare** page to:
-- View file differences between variants
-- See side-by-side code comparisons
-- Mark files as reviewed, correct, or needing attention
-- Track your review progress
-
-### Step 5: View Statistics
-
-The **Stats** page shows your review progress across all exercises and variants.
-
-### Managing Multiple Exercises
-
-- Use the **Exercise Selector** dropdown to switch between exercises
-- Click **+ New Exercise** to add another exercise
-- Use **Export** to backup your configuration
-- Use **Import** to restore from a backup
-
-## Running with Docker (recommended)
-1. Copy the example client env file if you want to override the default API host (optional):
-   ```bash
-   cp client/.env.example client/.env
-   # edit VITE_API_BASE_URL if the API is not available at http://localhost:4000
-   ```
-2. Start both services:
-   ```bash
-   ./start.sh
-   ```
-3. Open the client at http://localhost:3003. The API is exposed on http://localhost:4000.
-
-### Volumes & folders
-- `./data` on the host is mounted into the server container at `/data`. Every target folder you pick must resolve inside `/data`, ensuring cloned repositories are written to a real host directory.
-- `./server/storage` is mounted to `/app/storage` so the saved JSON survives container restarts.
-
-### Changing the client API base URL
-The React build bakes `VITE_API_BASE_URL` at build time. By default Docker Compose passes `http://localhost:4000`. Adjust `docker-compose.yml` (client → build.args) if your API lives elsewhere.
-
-## Local development without Docker
-
-For development without Docker:
-
-```bash
-# Terminal 1: Start the server
-cd server
-npm install
-npm run dev
-
-# Terminal 2: Start the client
-cd client
-cp .env.example .env
-npm install
-npm run dev
-```
-
-The Vite dev server expects the API at `http://localhost:4000` unless you override `VITE_API_BASE_URL` in `client/.env`.
-
-## Project Structure
-
-```
-variants-comparer/
-├── client/                # React client application
-│   ├── src/
-│   │   ├── components/   # UI components (shadcn/ui)
-│   │   ├── contexts/     # React contexts
-│   │   ├── lib/          # Utilities and API client
-│   │   ├── pages/        # Main pages (Configure, Compare)
-│   │   └── types.ts      # TypeScript types
-│   ├── Dockerfile
-│   └── package.json
-├── server/               # Express server API
-│   ├── src/
-│   │   └── index.ts      # Main server file
-│   ├── storage/          # Persistent config storage
-│   ├── Dockerfile
-│   └── package.json
-├── data/                 # Cloned repositories and notes
-│   └── exam-variants/    # Organized by exercise and variant
-├── docker-compose.yml    # Docker orchestration
-└── start.sh             # Helper script
-```
-
-## API summary
-
-### Endpoints
-
-- **`GET /api/config`** – Fetch saved variants and target folder
-- **`POST /api/save`** – Persist current form (validates target folder and URLs)
-- **`POST /api/download`** – Clone repositories into `<target>/<exercise>/<variant>/<test|solution|template>` and write `notes.md`
-
-### Request/Response Format
-
-All payloads share the same shape:
-
-```json
-{
-  "targetFolder": "./exam-variants",
-  "exerciseName": "Exercise 1",
-  "variants": [
-    { 
-      "label": "Variant 1", 
-      "testRepo": "https://github.com/user/test-repo", 
-      "solutionRepo": "https://github.com/user/solution-repo", 
-      "templateRepo": "https://github.com/user/template-repo", 
-      "markdown": "# Notes\n\nVariant-specific notes", 
-      "courseLink": "https://example.edu/course/1" 
-    },
-    { "label": "Variant 2", ... },
-    { "label": "Variant 3", ... }
-  ]
-}
-```
-
-## Configuration
-
-### Environment Variables
-
-**Server** (`server/.env`):
-- `PORT` – Server port (default: 4000)
-- `ALLOWED_BASE_DIR` – Base directory for downloads (default: /data)
-- `CONFIG_PATH` – Path to config JSON file (default: /app/storage/config.json)
-
-**Client** (`client/.env`):
-- `VITE_API_BASE_URL` – API endpoint (default: http://localhost:4000)
-
-## Folder structure after download
+### Directory Structure
 
 ```
 <target-folder>/
-  exercise-1/
-    variant-1/
-      test/          # Cloned test repository
-      solution/      # Cloned solution repository
-      template/      # Cloned template repository
-      notes.md       # Variant-specific markdown notes
-    variant-2/
-      test/
-      solution/
-      template/
-      notes.md
-    variant-3/
-      test/
-      solution/
-      template/
-      notes.md
+  └── <exercise-name>/
+      └── <variant-label>/
+          ├── test/          # Test repository
+          ├── solution/      # Solution repository
+          ├── template/      # Template repository
+          └── notes.md       # Notes
 ```
 
-## Useful scripts
+### File Mapping Feature
 
-- **`start.sh`** – Runs `docker compose up -d --build` to start all services
-- **Server commands**:
-  - `npm run dev` – Start development server with hot reload
-  - `npm run build` – Build for production
-  - `npm start` – Run production build
-- **Client commands**:
-  - `npm run dev` – Start Vite dev server
-  - `npm run build` – Build for production
-  - `npm run preview` – Preview production build locally
+Compare files with **different names or paths** across variants:
+
+1. After download, go to **Compare** page
+2. Click **"+ Add Mapping"**
+3. Select base file, target variant, and corresponding file
+4. System can auto-suggest mappings based on content similarity
+
+**Example**: Compare `src/Main.java` (Variant A) with `src/MainSolution.java` (Variant B)
+
+## Configuration
+
+Edit [client/.env](client/.env) and [server/.env](server/.env) to change ports or API URLs.
 
 ## Troubleshooting
 
-### Common Issues
+**Git clone failures**: Use token URLs for private repos: `https://<TOKEN>@github.com/org/repo.git`
 
-**Target folder rejected**
-- Ensure the path is under `/data` (maps to `./data` on the host)
-- The server validates that all downloads stay within `ALLOWED_BASE_DIR`
+**Port conflicts**: Change ports in `docker-compose.yml`
 
-**Git clone failures**
-- Check that the server container has repository access
-- For private repos, you **must** use URLs with embedded tokens:
-  ```
-  https://<YOUR_TOKEN>@github.com/org/repo.git
-  ```
-- Plain HTTPS URLs (without token) and SSH URLs will not work
-- Verify your token has the necessary repository access permissions
-
-**API unreachable from client**
-- Verify `VITE_API_BASE_URL` matches your browser's API URL
-- Check that the server is running on the expected port (default: 4000)
-- Ensure Docker containers are on the same network
-
-**Port already in use**
-- Change ports in `docker-compose.yml`:
-  ```yaml
-  ports:
-    - "3004:80"    # Client (change 3003 to 3004)
-    - "4001:4000"  # Server (change 4000 to 4001)
-  ```
-
-**Container won't start**
-- Check Docker logs: `docker logs exam-comparer-server` or `docker logs exam-comparer-client`
-- Ensure Docker daemon is running
-- Try rebuilding: `docker compose up -d --build --force-recreate`
-
-## Tech Stack
-
-**Client**
-- React 19
-- TypeScript
-- Vite
-- TailwindCSS
-- shadcn/ui
-- React Router
-
-**Server**
-- Node.js
-- Express
-- TypeScript
-- simple-git
-- Zod (validation)
-
-**Infrastructure**
-- Docker & Docker Compose
-- Nginx (client serving)
-
-## License
-
-MIT (or specify your license)
-
----
-
-**Note**: This project is designed for educational purposes to manage exam variants and their associated repositories. Ensure you have proper access rights to any repositories you clone.
+**Logs**: `docker compose logs -f`

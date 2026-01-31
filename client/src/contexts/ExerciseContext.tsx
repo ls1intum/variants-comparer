@@ -62,13 +62,14 @@ export function ExerciseProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Save activeExerciseIndex to server when it changes (but not on initial mount)
+  // Bug fix: Added debouncing to prevent race conditions when both exercises and activeIndex change
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false;
       return;
     }
     
-    const saveActiveIndex = async () => {
+    const timeoutId = setTimeout(async () => {
       setIsSaving(true);
       try {
         // Filter out incomplete file mappings to pass server validation
@@ -95,9 +96,9 @@ export function ExerciseProvider({ children }: { children: ReactNode }) {
       } finally {
         setIsSaving(false);
       }
-    };
+    }, 300); // Debounce for 300ms to prevent race conditions
 
-    saveActiveIndex();
+    return () => clearTimeout(timeoutId);
   }, [activeExerciseIndex, exercises]);
 
   const addExercise = (name?: string) => {
@@ -105,14 +106,21 @@ export function ExerciseProvider({ children }: { children: ReactNode }) {
     if (name) {
       newExercise.exerciseName = name;
     }
-    setExercises((prev) => [...prev, newExercise]);
-    setActiveExerciseIndex(exercises.length);
+    // Bug fix: Use functional update to get correct array length
+    setExercises((prev) => {
+      setActiveExerciseIndex(prev.length); // Use prev.length which is the actual current length
+      return [...prev, newExercise];
+    });
   };
 
   const deleteExercise = (index: number) => {
     if (exercises.length <= 1) return;
+    const newLength = exercises.length - 1;
     setExercises((prev) => prev.filter((_, idx) => idx !== index));
-    if (activeExerciseIndex >= index && activeExerciseIndex > 0) {
+    // Bug fix: Ensure activeExerciseIndex stays within bounds after deletion
+    if (activeExerciseIndex >= newLength) {
+      setActiveExerciseIndex(Math.max(0, newLength - 1));
+    } else if (activeExerciseIndex > index) {
       setActiveExerciseIndex(activeExerciseIndex - 1);
     }
   };
