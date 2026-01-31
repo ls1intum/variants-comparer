@@ -41,7 +41,7 @@ The **Exam Variants Comparer** helps you manage and compare multiple variants of
 ## Prerequisites
 - Docker & Docker Compose v2
 - Git (for repository cloning)
-- **GitHub Personal Access Token** (for cloning repositories)
+- Access to the repositories you want to clone
 - Node.js 18+ and npm (for local development without Docker)
 
 ## Quick Start
@@ -49,8 +49,8 @@ The **Exam Variants Comparer** helps you manage and compare multiple variants of
 The fastest way to get started:
 
 ```bash
-# Clone the repository using a Personal Access Token
-git clone https://<YOUR_GITHUB_TOKEN>@github.com/ls1intum/variants-comparer.git
+# Clone the tool repository
+git clone https://github.com/ls1intum/variants-comparer.git
 cd variants-comparer
 
 # Start with Docker
@@ -60,8 +60,6 @@ cd variants-comparer
 # Client: http://localhost:3003
 # API: http://localhost:4000
 ```
-
-> ⚠️ **Important**: Always clone using a Personal Access Token (PAT), not via plain HTTPS or SSH. Replace `<YOUR_GITHUB_TOKEN>` with your actual token.
 
 ## User Guide
 
@@ -77,14 +75,19 @@ cd variants-comparer
 3. **Configure each Variant** (1, 2, 3):
    - **Variant Label**: A name for this variant (e.g., "birthday", "carnival", "easter")
    - **Course Link**: Optional link to your course management system
-   - **Repository URLs**: Enter the HTTPS URLs for:
+   - **Repository URLs**: Enter the Git URLs for:
      - **Template Repo**: Starting code given to students
      - **Solution Repo**: Reference solution
      - **Test Repo**: Test cases
    - **Notes**: Markdown notes for this variant (problem statement, hints, etc.)
 
-> 💡 **Tip**: Use repository URLs with embedded tokens for private repos:
-> `https://<TOKEN>@github.com/org/repo.git`
+> ⚠️ **Important**: For private repositories, you must use URLs with embedded Personal Access Tokens:
+> 
+> ```
+> https://<YOUR_GITHUB_TOKEN>@github.com/org/repo.git
+> ```
+> 
+> Do NOT use plain HTTPS URLs or SSH URLs - token-based authentication is required for the cloning to work.
 
 ### Step 2: Save Your Configuration
 
@@ -263,10 +266,12 @@ All payloads share the same shape:
 
 **Git clone failures**
 - Check that the server container has repository access
-- For private repos, you may need to:
-  - Mount SSH keys into the container
-  - Use HTTPS URLs with embedded tokens
-  - Configure git credentials
+- For private repos, you **must** use URLs with embedded tokens:
+  ```
+  https://<YOUR_TOKEN>@github.com/org/repo.git
+  ```
+- Plain HTTPS URLs (without token) and SSH URLs will not work
+- Verify your token has the necessary repository access permissions
 
 **API unreachable from client**
 - Verify `VITE_API_BASE_URL` matches your browser's API URL
