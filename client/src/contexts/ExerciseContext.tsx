@@ -71,8 +71,15 @@ export function ExerciseProvider({ children }: { children: ReactNode }) {
     const saveActiveIndex = async () => {
       setIsSaving(true);
       try {
+        // Filter out incomplete file mappings to pass server validation
+        const sanitizedExercises = exercises.map(ex => ({
+          ...ex,
+          fileMappings: (ex.fileMappings || []).filter(
+            (m) => m.baseFile.trim() && m.variantFile.trim() && m.variantLabel.trim()
+          ),
+        }));
         const payload: MultiExerciseConfig = {
-          exercises,
+          exercises: sanitizedExercises,
           activeExerciseIndex,
         };
         console.log('Saving active exercise index:', activeExerciseIndex);

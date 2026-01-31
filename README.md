@@ -6,6 +6,16 @@
   A two-service setup (Express API + React + shadcn/ui client) that lets you capture three exam variants, store their repository links, download them into a structured folder tree, and keep accompanying markdown notes. Everything is dockerized with a persistent host folder for the cloned repositories.
 </div>
 
+## What is this tool?
+
+The **Exam Variants Comparer** helps you manage and compare multiple variants of exam exercises. It's designed for instructors or teaching assistants who need to:
+
+- **Organize exam variants**: Each exercise can have up to 3 variants (e.g., different exam groups), each with test, solution, and template repositories
+- **Clone repositories automatically**: Download all repositories in one click with proper folder organization
+- **Compare code differences**: Side-by-side view to check differences between variants
+- **Track review progress**: Mark files as reviewed, correct, or needing attention
+- **Keep notes**: Attach markdown notes to each variant (e.g., problem statements)
+
 ## Features
 - 🎨 **Modern UI**: React + Vite + shadcn/ui for a clean, responsive interface
 - 📝 **Variant Management**: Handle three variants (test, solution, template) with repository links and markdown notes
@@ -17,8 +27,10 @@
 - 📚 **Course Integration**: Optional course-management links per variant
 
 ## Table of Contents
+- [What is this tool?](#what-is-this-tool)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
+- [User Guide](#user-guide)
 - [Running with Docker](#running-with-docker-recommended)
 - [Local Development](#local-development-without-docker)
 - [Project Structure](#project-structure)
@@ -29,6 +41,7 @@
 ## Prerequisites
 - Docker & Docker Compose v2
 - Git (for repository cloning)
+- **GitHub Personal Access Token** (for cloning repositories)
 - Node.js 18+ and npm (for local development without Docker)
 
 ## Quick Start
@@ -36,17 +49,69 @@
 The fastest way to get started:
 
 ```bash
-# Clone the repository
-git clone <your-repo-url>
+# Clone the repository using a Personal Access Token
+git clone https://<YOUR_GITHUB_TOKEN>@github.com/ls1intum/variants-comparer.git
 cd variants-comparer
 
 # Start with Docker
 ./start.sh
 
 # Open your browser
-# Client: http://localhost:3000
+# Client: http://localhost:3003
 # API: http://localhost:4000
 ```
+
+> ⚠️ **Important**: Always clone using a Personal Access Token (PAT), not via plain HTTPS or SSH. Replace `<YOUR_GITHUB_TOKEN>` with your actual token.
+
+## User Guide
+
+### Getting Started
+
+1. **Open the application** at http://localhost:3003
+2. You'll see the **Configure** page where you can set up your exercises
+
+### Step 1: Configure an Exercise
+
+1. **Target Folder**: Enter where repositories should be saved (e.g., `exam-variants`)
+2. **Exercise Name**: Give your exercise a name (e.g., `e03` or `Birthday Problem`)
+3. **Configure each Variant** (1, 2, 3):
+   - **Variant Label**: A name for this variant (e.g., "birthday", "carnival", "easter")
+   - **Course Link**: Optional link to your course management system
+   - **Repository URLs**: Enter the HTTPS URLs for:
+     - **Template Repo**: Starting code given to students
+     - **Solution Repo**: Reference solution
+     - **Test Repo**: Test cases
+   - **Notes**: Markdown notes for this variant (problem statement, hints, etc.)
+
+> 💡 **Tip**: Use repository URLs with embedded tokens for private repos:
+> `https://<TOKEN>@github.com/org/repo.git`
+
+### Step 2: Save Your Configuration
+
+Click **Save Links** to persist your configuration. This saves your setup to `server/storage/config.json`.
+
+### Step 3: Download Repositories
+
+Click **Download** to clone all configured repositories. Progress is shown for each clone operation.
+
+### Step 4: Compare Variants
+
+Navigate to the **Compare** page to:
+- View file differences between variants
+- See side-by-side code comparisons
+- Mark files as reviewed, correct, or needing attention
+- Track your review progress
+
+### Step 5: View Statistics
+
+The **Stats** page shows your review progress across all exercises and variants.
+
+### Managing Multiple Exercises
+
+- Use the **Exercise Selector** dropdown to switch between exercises
+- Click **+ New Exercise** to add another exercise
+- Use **Export** to backup your configuration
+- Use **Import** to restore from a backup
 
 ## Running with Docker (recommended)
 1. Copy the example client env file if you want to override the default API host (optional):
@@ -58,7 +123,7 @@ cd variants-comparer
    ```bash
    ./start.sh
    ```
-3. Open the client at http://localhost:3000. The API is exposed on http://localhost:4000.
+3. Open the client at http://localhost:3003. The API is exposed on http://localhost:4000.
 
 ### Volumes & folders
 - `./data` on the host is mounted into the server container at `/data`. Every target folder you pick must resolve inside `/data`, ensuring cloned repositories are written to a real host directory.
@@ -212,7 +277,7 @@ All payloads share the same shape:
 - Change ports in `docker-compose.yml`:
   ```yaml
   ports:
-    - "3001:80"    # Client (change 3000 to 3001)
+    - "3004:80"    # Client (change 3003 to 3004)
     - "4001:4000"  # Server (change 4000 to 4001)
   ```
 

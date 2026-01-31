@@ -95,11 +95,22 @@ function ConfigurePage() {
         throw new Error('Invalid config format: missing exercises array');
       }
       
+      // Sanitize file mappings to filter out incomplete entries
+      const sanitizedConfig: MultiExerciseConfig = {
+        ...config,
+        exercises: config.exercises.map(ex => ({
+          ...ex,
+          fileMappings: (ex.fileMappings || []).filter(
+            (m) => m.baseFile?.trim() && m.variantFile?.trim() && m.variantLabel?.trim()
+          ),
+        })),
+      };
+      
       // Save to server
       const response = await fetch(`${API_BASE}/api/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
+        body: JSON.stringify(sanitizedConfig),
       });
       
       const data = await response.json();
@@ -107,9 +118,9 @@ function ConfigurePage() {
         throw new Error(data?.error ?? 'Failed to save imported config');
       }
       
-      // Update local state
-      setExercises(config.exercises);
-      setActiveExerciseIndex(config.activeExerciseIndex || 0);
+      // Update local state with sanitized config
+      setExercises(sanitizedConfig.exercises);
+      setActiveExerciseIndex(sanitizedConfig.activeExerciseIndex || 0);
       
       addToast(`Config imported from ${file.name}`, 'success');
     } catch (error) {
@@ -196,7 +207,10 @@ function ConfigurePage() {
         markdown: variant.markdown,
         courseLink: variant.courseLink.trim(),
       })),
-      fileMappings: ex.fileMappings || [],
+      // Filter out incomplete file mappings to pass server validation
+      fileMappings: (ex.fileMappings || []).filter(
+        (m) => m.baseFile.trim() && m.variantFile.trim() && m.variantLabel.trim()
+      ),
     })),
     activeExerciseIndex,
   });
