@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { API_BASE } from '@/lib/api';
+import { clearReviewStatuses, getReviewStatuses, getStats, getStatsIncludedTypes, setStatsIncludedTypes } from '@/lib/service';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { ReportDialog } from '@/components/ReportDialog';
 import type { CompareType, FileReview } from '@/types';
 
 type CompareTypeStats = {
@@ -19,11 +20,6 @@ type ExerciseStats = {
   byCompareType: Record<string, CompareTypeStats>;
   byVariant: Record<string, Record<string, CompareTypeStats>>;
   totalReviewed: number;
-};
-
-type StatsResponse = {
-  ok: boolean;
-  stats: ExerciseStats[];
 };
 
 const compareTypeLabels: Record<string, string> = {
@@ -43,36 +39,16 @@ function StatsPage() {
   const [reviewStatuses, setReviewStatuses] = useState<FileReview[]>([]);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+  const [showReport, setShowReport] = useState(false);
 
   // Function to fetch data (extracted so we can call it after clearing)
   const fetchData = async () => {
     try {
       setLoading(true);
       
-      // Fetch stats, included types, and review statuses in parallel
-      const [statsRes, typesRes, reviewRes] = await Promise.all([
-        fetch(`${API_BASE}/api/stats`),
-        fetch(`${API_BASE}/api/stats-included-types`),
-        fetch(`${API_BASE}/api/review-status`),
-      ]);
-      
-      const statsData: StatsResponse = await statsRes.json();
-      const typesData = await typesRes.json();
-      const reviewData = await reviewRes.json();
-      
-      if (statsData.ok) {
-        setStats(statsData.stats);
-      } else {
-        setError('Failed to load stats');
-      }
-      
-      if (typesData.ok && typesData.statsIncludedTypes) {
-        setIncludedTypes(typesData.statsIncludedTypes);
-      }
-      
-      if (reviewData.ok && reviewData.reviewStatuses) {
-        setReviewStatuses(reviewData.reviewStatuses);
-      }
+      setStats(await getStats());
+      setIncludedTypes(getStatsIncludedTypes());
+      setReviewStatuses(getReviewStatuses());
     } catch (err) {
       setError('Failed to fetch stats');
       console.error(err);
@@ -90,16 +66,8 @@ function StatsPage() {
   const handleClearAllStats = async () => {
     try {
       setIsClearing(true);
-      const response = await fetch(`${API_BASE}/api/review-status`, {
-        method: 'DELETE',
-      });
-      const data = await response.json();
-      if (data.ok) {
-        // Refresh the data
-        await fetchData();
-      } else {
-        console.error('Failed to clear stats:', data.error);
-      }
+      clearReviewStatuses();
+      await fetchData();
     } catch (err) {
       console.error('Failed to clear stats:', err);
     } finally {
@@ -115,13 +83,8 @@ function StatsPage() {
     
     setIncludedTypes(newIncluded);
     
-    // Save to server
     try {
-      await fetch(`${API_BASE}/api/stats-included-types`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ statsIncludedTypes: newIncluded }),
-      });
+      setStatsIncludedTypes(newIncluded);
     } catch (err) {
       console.error('Failed to save included types:', err);
     }
@@ -178,6 +141,15 @@ function StatsPage() {
             <h1 className="text-3xl font-semibold tracking-tight">Review Progress</h1>
             <p className="text-muted-foreground mt-2">Track your review progress across all exercises and comparison types.</p>
           </div>
+          <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowReport(true)}>
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Export Report
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -194,8 +166,11 @@ function StatsPage() {
             </svg>
             Clear All Stats
           </Button>
+          </div>
         </div>
       </header>
+
+      {showReport && <ReportDialog onClose={() => setShowReport(false)} />}
 
       {/* Confirmation Dialog */}
       <ConfirmDialog

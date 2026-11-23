@@ -34,7 +34,7 @@ export function SiteHeader() {
     <header className="border-b bg-card">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-4">
         <div className="flex items-center gap-4">
-          <img src="/logo_comparer.png" alt="Exam Variants Comparer" className="h-20 w-auto" />
+          <img src={`${import.meta.env.BASE_URL}logo_comparer.png`} alt="Exam Variants Comparer" className="h-20 w-auto" />
           <div>
             <p className="text-xs uppercase tracking-widest text-muted-foreground">Exam variants comparer</p>
             <p className="text-lg font-semibold">Variant workspace</p>

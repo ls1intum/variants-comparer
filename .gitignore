@@ -1,12 +1,9 @@
 node_modules
 **/node_modules
-server/dist
 client/dist
-server/storage/config.json
-data/*
-!data/.gitkeep
-!data/README.md
+client/.wrangler
 *.log
 .DS_Store
-server/storage/*.backup
-repos.json
+
+# Local Artemis exercise exports (exam content)
+var*_*.zip

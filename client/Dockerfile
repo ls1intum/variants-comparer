@@ -7,8 +7,8 @@ COPY package*.json ./
 RUN npm ci
 
 FROM base AS build
-ARG VITE_API_BASE_URL=http://localhost:4000
-ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+# Overrides the default in client/.env only when passed (an unset ARG is not exported to RUN)
+ARG VITE_PROXY_BASE
 COPY --from=deps /app/node_modules ./node_modules
 COPY . ./
 RUN npm run build

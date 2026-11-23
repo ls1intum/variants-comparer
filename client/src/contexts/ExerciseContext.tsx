@@ -1,6 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react';
-import { API_BASE } from '@/lib/api';
+import { ZodError } from 'zod';
+import { readConfig, saveExercises } from '@/lib/config';
+import { clearExerciseRepos } from '@/lib/importer';
+import { exerciseDir } from '@/lib/repoStore';
 import type { ExerciseConfig, MultiExerciseConfig } from '@/types';
 
 type ExerciseContextType = {
@@ -12,8 +15,10 @@ type ExerciseContextType = {
   deleteExercise: (index: number) => void;
   currentExercise: ExerciseConfig;
   loading: boolean;
-  isSaving: boolean;
+  saveState: SaveState;
 };
+
+export type SaveState = { status: 'saved' | 'saving' } | { status: 'error'; error: string };
 
 const ExerciseContext = createContext<ExerciseContextType | undefined>(undefined);
 
@@ -28,6 +33,8 @@ function createExerciseTemplate(): ExerciseConfig {
       templateRepo: '',
       markdown: '',
       courseLink: '',
+      artemisUrl: '',
+      source: 'urls' as const,
     })),
   };
 }
@@ -36,43 +43,29 @@ export function ExerciseProvider({ children }: { children: ReactNode }) {
   const [exercises, setExercises] = useState<ExerciseConfig[]>([createExerciseTemplate()]);
   const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
+  const [saveState, setSaveState] = useState<SaveState>({ status: 'saved' });
   const isInitialMount = useRef(true);
 
   useEffect(() => {
-    const loadConfig = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/api/config`);
-        const payload = await response.json();
-        if (response.ok && payload?.ok) {
-          const multiConfig: MultiExerciseConfig = payload.data;
-          if (multiConfig.exercises && multiConfig.exercises.length > 0) {
-            setExercises(multiConfig.exercises);
-            setActiveExerciseIndex(multiConfig.activeExerciseIndex || 0);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to load configuration:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadConfig();
+    const multiConfig = readConfig();
+    if (multiConfig.exercises.length > 0) {
+      setExercises(multiConfig.exercises);
+      setActiveExerciseIndex(multiConfig.activeExerciseIndex || 0);
+    }
+    setLoading(false);
   }, []);
 
-  // Save activeExerciseIndex to server when it changes (but not on initial mount)
-  // Bug fix: Added debouncing to prevent race conditions when both exercises and activeIndex change
+  // Persist exercises and active index when they change (debounced, not on initial mount)
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false;
       return;
     }
     
-    const timeoutId = setTimeout(async () => {
-      setIsSaving(true);
+    setSaveState({ status: 'saving' });
+    const timeoutId = setTimeout(() => {
       try {
-        // Filter out incomplete file mappings to pass server validation
+        // Filter out incomplete file mappings to pass validation
         const sanitizedExercises = exercises.map(ex => ({
           ...ex,
           fileMappings: (ex.fileMappings || []).filter(
@@ -83,18 +76,11 @@ export function ExerciseProvider({ children }: { children: ReactNode }) {
           exercises: sanitizedExercises,
           activeExerciseIndex,
         };
-        console.log('Saving active exercise index:', activeExerciseIndex);
-        const response = await fetch(`${API_BASE}/api/save`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const result = await response.json();
-        console.log('Save result:', result);
+        saveExercises(payload);
+        setSaveState({ status: 'saved' });
       } catch (error) {
-        console.error('Failed to save active exercise index:', error);
-      } finally {
-        setIsSaving(false);
+        const message = error instanceof ZodError ? error.issues[0]?.message : (error as Error).message;
+        setSaveState({ status: 'error', error: message ?? 'Invalid configuration' });
       }
     }, 300); // Debounce for 300ms to prevent race conditions
 
@@ -115,6 +101,11 @@ export function ExerciseProvider({ children }: { children: ReactNode }) {
 
   const deleteExercise = (index: number) => {
     if (exercises.length <= 1) return;
+    const deleted = exercises[index];
+
+    /*  Drop the stored repositories, unless another exercise maps to the same folder  */
+    if (deleted && !exercises.some((ex, idx) => idx !== index && exerciseDir(ex) === exerciseDir(deleted)))
+      clearExerciseRepos(deleted).catch((error) => console.error('Failed to clear repositories:', error));
     const newLength = exercises.length - 1;
     setExercises((prev) => prev.filter((_, idx) => idx !== index));
     // Bug fix: Ensure activeExerciseIndex stays within bounds after deletion
@@ -138,7 +129,7 @@ export function ExerciseProvider({ children }: { children: ReactNode }) {
         deleteExercise,
         currentExercise,
         loading,
-        isSaving,
+        saveState,
       }}
     >
       {children}

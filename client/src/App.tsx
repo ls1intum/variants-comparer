@@ -9,7 +9,7 @@ import { ToastProvider } from '@/contexts/ToastContext';
 
 function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <ToastProvider>
         <ExerciseProvider>
           <div className="min-h-screen bg-muted/40">

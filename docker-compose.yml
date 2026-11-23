@@ -1,28 +1,11 @@
 services:
-  server:
-    build:
-      context: ./server
-    container_name: exam-comparer-server
-    ports:
-      - "4000:4000"
-    environment:
-      - PORT=4000
-      - ALLOWED_BASE_DIR=/data
-      - CONFIG_PATH=/app/storage/config.json
-      - HOST_DATA_PATH=${PWD}/data
-    volumes:
-      - ./data:/data
-      - ./server/storage:/app/storage
-    restart: unless-stopped
-
   client:
     build:
       context: ./client
       args:
-        - VITE_API_BASE_URL=http://localhost:4000
+        # Optional override of the default proxy base URL in client/.env (taken from the shell environment if set)
+        - VITE_PROXY_BASE
     container_name: exam-comparer-client
     ports:
       - "3003:80"
-    depends_on:
-      - server
     restart: unless-stopped

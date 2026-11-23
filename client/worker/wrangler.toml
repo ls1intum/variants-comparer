@@ -1,0 +1,11 @@
+# Standalone proxy Worker: deploy with `npx wrangler deploy --config worker/wrangler.toml` (from client/)
+name = "variants-comparer-proxy"
+main = "index.ts"
+compatibility_date = "2026-11-01"
+
+[vars]
+# Origins of the app instances allowed to use the proxy (comma-separated)
+ALLOWED_ORIGINS = "https://valentinherrmann.github.io,http://localhost:3003,https://variants-comparer.valentin-herrmann.com"
+# Optional comma-separated allowlists of Git / Artemis hosts (empty = any host)
+ALLOWED_GIT_HOSTS = ""
+ALLOWED_ARTEMIS_HOSTS = "artemis.tum.de"

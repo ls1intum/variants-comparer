@@ -11,6 +11,8 @@ export type VariantForm = {
   templateRepo: string;
   markdown: string;
   courseLink: string;
+  artemisUrl?: string;
+  source?: 'urls' | 'artemis';
 };
 
 export type ReviewStatus = 'unchecked' | 'correct' | 'needs-attention';
@@ -20,6 +22,7 @@ export type FileReview = {
   variantLabel: string;
   compareType: CompareType;
   status: ReviewStatus;
+  comment?: string;
 };
 
 export type ExerciseConfig = {
@@ -74,6 +77,7 @@ export type VariantComparison = {
 export type FileComparison = {
   relativePath: string;
   baseContent: string;
+  baseExists: boolean;
   variants: VariantComparison[];
 };
 

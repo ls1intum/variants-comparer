@@ -1,0 +1,10 @@
+name = "variants-comparer"
+pages_build_output_dir = "./dist"
+compatibility_date = "2026-11-01"
+
+[vars]
+# Additional origins allowed to use the /git-proxy and /artemis-proxy functions (e.g. the GitHub Pages backup instance)
+ALLOWED_ORIGINS = "https://valentinherrmann.github.io"
+# Optional comma-separated allowlists of Git / Artemis hosts (empty = any host)
+ALLOWED_GIT_HOSTS = ""
+ALLOWED_ARTEMIS_HOSTS = ""

@@ -1,11 +1,19 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useMemo, useState, useRef, useCallback, type ReactNode } from 'react';
 import DiffMatchPatch from 'diff-match-patch';
 
-import { API_BASE } from '@/lib/api';
-import type { CompareType, ComparisonResponse, FileComparison, ReviewStatus } from '@/types';
+import { deleteRepoFile, writeRepoFile } from '@/lib/changes';
+import { alignVariants, type AlignedCell, type AlignedRow } from '@/lib/diff';
+import { compare, getReviewStatuses, setReviewComment, setReviewStatus } from '@/lib/service';
+import type { CompareType, ComparisonResponse, FileComparison, FileMapping, ReviewStatus, VariantComparison } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import type { EditedSides } from '@/components/FileEditor';
+import { PendingChangesPanel } from '@/components/PendingChangesPanel';
 import { useExercise } from '@/contexts/ExerciseContext';
+import { useToast } from '@/contexts/ToastContext';
+
+/*  CodeMirror is only loaded once a file is edited  */
+const FileEditor = lazy(() => import('@/components/FileEditor').then((module) => ({ default: module.FileEditor })));
 
 const compareOptions: { value: CompareType; label: string }[] = [
   { value: 'problem', label: 'Problem Statement (Markdown)' },
@@ -42,17 +50,341 @@ function getInlineDiff(text1: string, text2: string): { left: CharSegment[]; rig
   return { left, right };
 }
 
-type OpenExternalAction = 'vscode-together' | 'vscode-separately';
+function ReviewButtons({ status, onChange, comment, onCommentChange }: Readonly<{
+  status: ReviewStatus;
+  onChange: (status: ReviewStatus) => void;
+  comment: string;
+  onCommentChange: (comment: string) => void;
+}>) {
+  const [ draft, setDraft ] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const isOpen = draft !== null;
 
-function FileComparisonCard({ 
+  /*  Focus the comment field when it opens  */
+  useEffect(() => {
+    if (isOpen)
+      textareaRef.current?.focus();
+  }, [ isOpen ]);
+  const saveComment = () => {
+    if (draft !== null)
+      onCommentChange(draft.trim());
+    setDraft(null);
+  };
+  return (
+    <div className="relative flex items-center gap-1 ml-2">
+      <button
+        onClick={() => onChange(status === 'correct' ? 'unchecked' : 'correct')}
+        className={`p-1.5 rounded-md transition-colors ${
+          status === 'correct'
+            ? 'bg-green-100 text-green-700 ring-1 ring-green-500'
+            : 'hover:bg-green-50 text-slate-400 hover:text-green-600'
+        }`}
+        title="Mark as correct / aligned"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      </button>
+      <button
+        onClick={() => onChange(status === 'needs-attention' ? 'unchecked' : 'needs-attention')}
+        className={`p-1.5 rounded-md transition-colors ${
+          status === 'needs-attention'
+            ? 'bg-red-100 text-red-700 ring-1 ring-red-500'
+            : 'hover:bg-red-50 text-slate-400 hover:text-red-600'
+        }`}
+        title="Mark as needs attention / doesn't align"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+      </button>
+      <button
+        onClick={() => setDraft(draft === null ? comment : null)}
+        className={`p-1.5 rounded-md transition-colors ${
+          comment
+            ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-500'
+            : 'hover:bg-blue-50 text-slate-400 hover:text-blue-600'
+        }`}
+        title={comment ? `Comment: ${comment}` : 'Add a review comment'}
+      >
+        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill={comment ? 'currentColor' : 'none'} fillOpacity={comment ? 0.2 : 0} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        </svg>
+      </button>
+      {draft !== null && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-80 space-y-2 rounded-md border border-slate-200 bg-white p-2 text-left shadow-lg">
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape')
+                setDraft(null);
+              else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey))
+                saveComment();
+            }}
+            rows={3}
+            placeholder="Why does this file need attention, or what was verified?"
+            className="w-full rounded-md border border-slate-300 p-2 text-xs font-sans font-normal"
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setDraft(null)}>Cancel</Button>
+            <Button size="sm" className="h-7 text-xs" onClick={saveComment}>Save</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiffCounts({ variant }: Readonly<{ variant: VariantComparison }>) {
+  const added = variant.lineDiff.filter(d => d.type === 'add').length;
+  const removed = variant.lineDiff.filter(d => d.type === 'remove').length;
+  const modified = variant.lineDiff.filter(d => d.type === 'modify').length;
+  return (
+    <span className="flex items-center gap-2 text-xs font-mono">
+      {added > 0 && <span className="text-green-700 font-semibold">+{added}</span>}
+      {removed > 0 && <span className="text-red-600 font-semibold">-{removed}</span>}
+      {modified > 0 && <span className="text-yellow-700 font-semibold">~{modified}</span>}
+    </span>
+  );
+}
+
+const cellBgClass: Record<AlignedCell['type'], string> = { add: 'bg-green-100', modify: 'bg-yellow-50', equal: '', remove: '' };
+
+function baseBgClass(row: AlignedRow) {
+  if (!row.base)
+    return 'bg-slate-50/30';
+  return row.base.changed ? 'bg-yellow-50' : '';
+}
+
+/*  Variant cell text; modified lines get char-level insert highlights, keyed by text offset  */
+function renderCellContent(row: AlignedRow, cell: AlignedCell | undefined) {
+  if (!cell)
+    return '\u00a0';
+  if (cell.type !== 'modify' || !row.base)
+    return cell.text || ' ';
+  let offset = 0;
+  return getInlineDiff(row.base.text, cell.text).right.map((segment) => {
+    const key = offset;
+    offset += segment.text.length;
+    return (
+      <span key={key} className={segment.type === 'insert' ? 'bg-green-600 text-white' : ''}>
+        {segment.text}
+      </span>
+    );
+  });
+}
+
+/*  Base and all variants side by side in one table, rows aligned on the base lines  */
+function AllVariantsFileCard({
+  fileComp,
+  baseVariant,
+  fileMappings,
+  reviewStatusFor,
+  onReviewStatusChange,
+  commentFor,
+  onCommentChange,
+  onEdit,
+}: Readonly<{
+  fileComp: FileComparison;
+  baseVariant: string;
+  fileMappings: FileMapping[];
+  reviewStatusFor: (variantLabel: string) => ReviewStatus;
+  onReviewStatusChange: (variantLabel: string, status: ReviewStatus) => void;
+  commentFor: (variantLabel: string) => string;
+  onCommentChange: (variantLabel: string, comment: string) => void;
+  onEdit: (variantIndex: number) => void;
+}>) {
+  const rows = useMemo(() => alignVariants(fileComp.baseContent, fileComp.variants), [ fileComp ]);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const firstDiffRef = useRef<HTMLTableRowElement | null>(null);
+  const firstDiffIndex = rows.findIndex((row) => !row.base || row.base.changed);
+
+  /*  Scroll to the first difference, keeping 5 lines of context  */
+  useEffect(() => {
+    if (scrollRef.current && firstDiffRef.current)
+      scrollRef.current.scrollTop = Math.max(0, firstDiffRef.current.offsetTop - 5 * 24);
+  }, [ rows ]);
+
+  const differing = fileComp.variants.filter((v) => v.hasDifference);
+  const statuses = differing.map((v) => reviewStatusFor(v.variant));
+  let borderColorClass = 'border-slate-300';
+  if (statuses.includes('needs-attention'))
+    borderColorClass = 'border-red-500 border-2';
+  else if (statuses.length > 0 && statuses.every((s) => s === 'correct'))
+    borderColorClass = 'border-green-500 border-2';
+
+  const lineNoCell = (lineNo?: number) => (
+    <td className="w-8 px-2 py-0.5 text-right text-slate-400 select-none border-x border-slate-200 bg-slate-50 h-6">
+      {lineNo ?? '\u00a0'}
+    </td>
+  );
+
+  return (
+    <Card className={`border ${borderColorClass}`}>
+      <CardHeader>
+        <CardTitle className="text-base font-mono">{fileComp.relativePath}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div ref={scrollRef} className="max-h-[600px] overflow-auto rounded-md bg-white border border-slate-200 shadow-inner">
+          <table className="w-full text-xs font-mono table-fixed">
+            <colgroup>
+              {[ baseVariant, ...fileComp.variants.map((v) => v.variant) ].map((label) => (
+                <Fragment key={label}>
+                  <col className="w-10" />
+                  <col />
+                </Fragment>
+              ))}
+            </colgroup>
+            <thead className="sticky top-0 z-10 bg-white shadow-sm">
+              <tr className="align-top">
+                <th colSpan={2} className="px-3 py-2 text-left text-sm font-semibold text-slate-700">{baseVariant}</th>
+                {fileComp.variants.map((variant, variantIndex) => {
+                  const mapping = fileMappings.find((m) => m.baseFile === fileComp.relativePath && m.variantLabel === variant.variant);
+                  return (
+                    <th key={variant.variant} colSpan={2} className="px-3 py-2 text-left font-normal">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-700">{variant.variant}</span>
+                        {!variant.exists && <span className="text-xs text-red-600">(missing)</span>}
+                        {mapping && (
+                          <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10" title={mapping.variantFile}>
+                            Mapped
+                          </span>
+                        )}
+                        <DiffCounts variant={variant} />
+                        {variant.hasDifference
+                          ? <ReviewButtons
+                              status={reviewStatusFor(variant.variant)}
+                              onChange={(status) => onReviewStatusChange(variant.variant, status)}
+                              comment={commentFor(variant.variant)}
+                              onCommentChange={(comment) => onCommentChange(variant.variant, comment)}
+                            />
+                          : <span className="text-xs text-muted-foreground">identical</span>}
+                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => onEdit(variantIndex)}>Edit</Button>
+                      </div>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, idx) => (
+                <tr key={row.id} ref={idx === firstDiffIndex ? firstDiffRef : undefined} className="h-6">
+                  {lineNoCell(row.base?.lineNo)}
+                  <td className={`px-3 py-0.5 whitespace-pre-wrap break-all ${baseBgClass(row)}`}>
+                    {row.base ? row.base.text || ' ' : '\u00a0'}
+                  </td>
+                  {fileComp.variants.map((variant, v) => {
+                    const cell = row.cells[v];
+                    return (
+                      <Fragment key={variant.variant}>
+                        {lineNoCell(cell?.lineNo)}
+                        <td className={`px-3 py-0.5 whitespace-pre-wrap break-all ${cell ? cellBgClass[cell.type] : 'bg-slate-50/30'}`}>
+                          {renderCellContent(row, cell)}
+                        </td>
+                      </Fragment>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/*  File list of the "All variants" view; review stats and filter cover all (file, differing variant) pairs  */
+function AllVariantsComparison({
+  fileComparisons,
+  baseVariant,
+  fileMappings,
+  showFilter,
+  statusOf,
+  onReviewStatusChange,
+  commentOf,
+  onCommentChange,
+  onEdit,
+}: Readonly<{
+  fileComparisons: FileComparison[];
+  baseVariant: string;
+  fileMappings: FileMapping[];
+  showFilter: 'all' | 'needs-attention' | 'unchecked';
+  statusOf: (path: string, variantLabel: string) => ReviewStatus;
+  onReviewStatusChange: (path: string, variantLabel: string, status: ReviewStatus) => void;
+  commentOf: (path: string, variantLabel: string) => string;
+  onCommentChange: (path: string, variantLabel: string, comment: string) => void;
+  onEdit: (path: string, variantIndex: number) => void;
+}>) {
+  const filesWithDifferences = fileComparisons.filter((fileComp) => fileComp.variants.some((v) => v.hasDifference));
+  if (filesWithDifferences.length === 0)
+    return <p className="text-sm text-muted-foreground">No differences detected.</p>;
+
+  const statusesOf = (fileComp: FileComparison) =>
+    fileComp.variants.filter((v) => v.hasDifference).map((v) => statusOf(fileComp.relativePath, v.variant));
+  const allStats = { unchecked: 0, correct: 0, 'needs-attention': 0 } as Record<ReviewStatus, number>;
+  for (const fileComp of filesWithDifferences)
+    for (const status of statusesOf(fileComp))
+      allStats[status]++;
+  const visibleFiles = filesWithDifferences.filter((fileComp) =>
+    showFilter === 'all' || statusesOf(fileComp).includes(showFilter));
+
+  return (
+    <>
+      <div className="flex items-center gap-4 text-sm">
+        <span className="text-muted-foreground">Review progress:</span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-3 h-3 rounded-full bg-green-500"></span>
+          <span className="text-green-700 font-medium">{allStats.correct} correct</span>
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-3 h-3 rounded-full bg-red-500"></span>
+          <span className="text-red-700 font-medium">{allStats['needs-attention']} need attention</span>
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-3 h-3 rounded-full bg-slate-300"></span>
+          <span className="text-slate-600">{allStats.unchecked} unchecked</span>
+        </span>
+      </div>
+      <div className="space-y-6">
+        {visibleFiles.map((fileComp) => (
+          <AllVariantsFileCard
+            key={fileComp.relativePath}
+            fileComp={fileComp}
+            baseVariant={baseVariant}
+            fileMappings={fileMappings}
+            reviewStatusFor={(label) => statusOf(fileComp.relativePath, label)}
+            onReviewStatusChange={(label, status) => onReviewStatusChange(fileComp.relativePath, label, status)}
+            commentFor={(label) => commentOf(fileComp.relativePath, label)}
+            onCommentChange={(label, comment) => onCommentChange(fileComp.relativePath, label, comment)}
+            onEdit={(variantIndex) => onEdit(fileComp.relativePath, variantIndex)}
+          />
+        ))}
+        {visibleFiles.length === 0 && (
+          <p className="text-sm text-muted-foreground text-center py-8">
+            No files match the current filter.
+          </p>
+        )}
+      </div>
+    </>
+  );
+}
+
+function FileComparisonCard({
   fileComp, 
   baseVariant, 
   activeVariantIndex,
   fileMappings = [],
   reviewStatus,
   onReviewStatusChange,
-  compareType,
-  onOpenExternal,
+  reviewComment,
+  onReviewCommentChange,
+  onEdit,
+  editor,
 }: { 
   fileComp: FileComparison; 
   baseVariant: string;
@@ -60,28 +392,14 @@ function FileComparisonCard({
   fileMappings?: Array<{ baseFile: string; variantFile: string; variantLabel: string }>;
   reviewStatus: ReviewStatus;
   onReviewStatusChange: (status: ReviewStatus) => void;
-  compareType: CompareType;
-  onOpenExternal: (relativePath: string, variantLabel: string, action: OpenExternalAction, mappedPath?: string) => void;
+  reviewComment: string;
+  onReviewCommentChange: (comment: string) => void;
+  onEdit: () => void;
+  editor?: ReactNode;
 }) {
   const baseLines = fileComp.baseContent.split('\n');
   const scrollRefs = useRef<(HTMLDivElement | null)[]>([]);
   const hasScrolledToFirst = useRef(false);
-  const [showOpenMenu, setShowOpenMenu] = useState(false);
-  const menuTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
-  // Bug fix: Clear timeout on unmount to prevent memory leak
-  useEffect(() => {
-    return () => {
-      if (menuTimeoutRef.current) {
-        clearTimeout(menuTimeoutRef.current);
-      }
-    };
-  }, []);
-  
-  const handleMenuBlur = useCallback(() => {
-    menuTimeoutRef.current = setTimeout(() => setShowOpenMenu(false), 150);
-  }, []);
-  
   // Only show the selected variant
   const selectedVariant = fileComp.variants[activeVariantIndex];
   
@@ -144,7 +462,7 @@ function FileComparisonCard({
     'border-slate-300';
 
   // External tools available for repo comparisons, not markdown
-  const canOpenExternal = compareType !== 'problem';
+
 
   return (
     <Card className={`border ${borderColorClass}`}>
@@ -162,82 +480,13 @@ function FileComparisonCard({
                 </span>
               </div>
             )}
-            {/* VS Code dropdown */}
-            {canOpenExternal && selectedVariant && (
-              <div className="relative">
-                <button
-                  onClick={() => setShowOpenMenu(!showOpenMenu)}
-                  onBlur={handleMenuBlur}
-                  className="p-1.5 rounded-md transition-colors hover:bg-blue-50 flex items-center gap-1"
-                  title="Open in VS Code"
-                >
-                  <img src="/vscode_icon.svg" alt="VS Code" width="16" height="16" />
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="6 9 12 15 18 9"></polyline>
-                  </svg>
-                </button>
-                {showOpenMenu && (
-                  <div className="absolute right-0 top-full mt-1 bg-white rounded-md shadow-lg border border-slate-200 py-1 z-50 min-w-[200px]">
-                    <button
-                      onClick={() => {
-                        onOpenExternal(fileComp.relativePath, selectedVariant.variant, 'vscode-together', mapping?.variantFile);
-                        setShowOpenMenu(false);
-                      }}
-                      className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2"
-                    >
-                      <img src="/vscode_icon.svg" alt="" width="14" height="14" />
-                      Open Together
-                    </button>
-                    <button
-                      onClick={() => {
-                        onOpenExternal(fileComp.relativePath, selectedVariant.variant, 'vscode-separately', mapping?.variantFile);
-                        setShowOpenMenu(false);
-                      }}
-                      className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2"
-                    >
-                      <img src="/vscode_icon.svg" alt="" width="14" height="14" />
-                      Open Separately
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-            {/* Review status buttons */}
-            <div className="flex items-center gap-1 ml-2">
-              <button
-                onClick={() => onReviewStatusChange(reviewStatus === 'correct' ? 'unchecked' : 'correct')}
-                className={`p-1.5 rounded-md transition-colors ${
-                  reviewStatus === 'correct' 
-                    ? 'bg-green-100 text-green-700 ring-1 ring-green-500' 
-                    : 'hover:bg-green-50 text-slate-400 hover:text-green-600'
-                }`}
-                title="Mark as correct / aligned"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
-              </button>
-              <button
-                onClick={() => onReviewStatusChange(reviewStatus === 'needs-attention' ? 'unchecked' : 'needs-attention')}
-                className={`p-1.5 rounded-md transition-colors ${
-                  reviewStatus === 'needs-attention' 
-                    ? 'bg-red-100 text-red-700 ring-1 ring-red-500' 
-                    : 'hover:bg-red-50 text-slate-400 hover:text-red-600'
-                }`}
-                title="Mark as needs attention / doesn't align"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <line x1="12" y1="8" x2="12" y2="12"></line>
-                  <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                </svg>
-              </button>
-            </div>
+            <ReviewButtons status={reviewStatus} onChange={onReviewStatusChange} comment={reviewComment} onCommentChange={onReviewCommentChange} />
+            {!editor && <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onEdit}>Edit</Button>}
           </div>
         </div>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-4 lg:grid-cols-2">
+        {editor ?? <div className="grid gap-4 lg:grid-cols-2">
           {/* Base variant column - show removed/modified lines highlighted */}
           <div className="space-y-2">
             <p className="text-sm font-semibold text-slate-700">{baseVariant}</p>
@@ -337,26 +586,7 @@ function FileComparisonCard({
                 {selectedVariant.variant}
                 {!selectedVariant.exists && <span className="ml-2 text-xs text-red-600">(missing)</span>}
               </p>
-              {(() => {
-                const addedLines = selectedVariant.lineDiff.filter(d => d.type === 'add').length;
-                const removedLines = selectedVariant.lineDiff.filter(d => d.type === 'remove').length;
-                const modifiedLines = selectedVariant.lineDiff.filter(d => d.type === 'modify').length;
-                const hasChanges = addedLines > 0 || removedLines > 0 || modifiedLines > 0;
-                
-                return hasChanges && (
-                  <div className="flex items-center gap-2 text-xs font-mono">
-                    {addedLines > 0 && (
-                      <span className="text-green-700 font-semibold">+{addedLines}</span>
-                    )}
-                    {removedLines > 0 && (
-                      <span className="text-red-600 font-semibold">-{removedLines}</span>
-                    )}
-                    {modifiedLines > 0 && (
-                      <span className="text-yellow-700 font-semibold">~{modifiedLines}</span>
-                    )}
-                  </div>
-                );
-              })()}
+              <DiffCounts variant={selectedVariant} />
             </div>
             <div
               ref={(el) => { scrollRefs.current[1] = el; }}
@@ -449,43 +679,48 @@ function FileComparisonCard({
               </table>
             </div>
           </div>
-        </div>
+        </div>}
       </CardContent>
     </Card>
   );
 }
 
 function ComparePage() {
-  const { currentExercise, activeExerciseIndex, isSaving } = useExercise();
+  const { currentExercise, activeExerciseIndex, setExercises } = useExercise();
+  const { addToast } = useToast();
   const [compareType, setCompareType] = useState<CompareType>('problem');
   const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
   const [compareStatus, setCompareStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [compareError, setCompareError] = useState<string>('');
   const [activeVariantIndex, setActiveVariantIndex] = useState(0);
   const [reviewStatuses, setReviewStatuses] = useState<Record<string, ReviewStatus>>({});
+  const [reviewComments, setReviewComments] = useState<Record<string, string>>({});
   const [showFilter, setShowFilter] = useState<'all' | 'needs-attention' | 'unchecked'>('all');
+  const [viewMode, setViewMode] = useState<'pairwise' | 'all'>('pairwise');
+  const [editing, setEditing] = useState<{ path: string; compareIndex: number } | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const shownCompareType = useRef<CompareType | null>(null);
 
   const exerciseName = currentExercise.exerciseName;
-  const targetFolder = currentExercise.targetFolder;
 
-  // Fetch review statuses from server
+  // Load persisted review statuses
   useEffect(() => {
     const fetchReviewStatuses = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/review-status`);
-        const data = await response.json();
-        if (data.ok && data.reviewStatuses) {
-          // Convert array to map for easier lookup
-          const statusMap: Record<string, ReviewStatus> = {};
-          for (const review of data.reviewStatuses) {
-            // Key format: exerciseName:filePath + compareType + variantLabel
-            const key = `${review.filePath}:${review.compareType}:${review.variantLabel}`;
-            statusMap[key] = review.status;
-          }
-          setReviewStatuses(statusMap);
+        // Convert array to map for easier lookup
+        const statusMap: Record<string, ReviewStatus> = {};
+        const commentMap: Record<string, string> = {};
+        for (const review of getReviewStatuses()) {
+          // Key format: exerciseName:filePath + compareType + variantLabel
+          const key = `${review.filePath}:${review.compareType}:${review.variantLabel}`;
+          statusMap[key] = review.status;
+          if (review.comment)
+            commentMap[key] = review.comment;
         }
+        setReviewStatuses(statusMap);
+        setReviewComments(commentMap);
       } catch (error) {
-        console.error('Failed to fetch review statuses:', error);
+        console.error('Failed to load review statuses:', error);
       }
     };
     fetchReviewStatuses();
@@ -496,125 +731,122 @@ function ComparePage() {
     return `${exerciseName}:${relativePath}:${compareType}:${variantLabel}`;
   }, [exerciseName, compareType]);
 
-  // Update review status for a file - save to server
+  // Update and persist review status for a file
   const handleReviewStatusChange = useCallback(async (relativePath: string, variantLabel: string, status: ReviewStatus) => {
     const key = getReviewKey(relativePath, variantLabel);
     
     // Optimistically update local state
     setReviewStatuses(prev => ({ ...prev, [key]: status }));
     
-    // Save to server
     try {
-      await fetch(`${API_BASE}/api/review-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          exerciseName,
-          filePath: relativePath,
-          variantLabel,
-          compareType,
-          status,
-        }),
-      });
+      setReviewStatus({ exerciseName, filePath: relativePath, variantLabel, compareType, status });
     } catch (error) {
       console.error('Failed to save review status:', error);
     }
   }, [getReviewKey, exerciseName, compareType]);
 
-  // Open files in VS Code
-  const handleOpenExternal = useCallback(async (relativePath: string, variantLabel: string, action: OpenExternalAction, mappedPath?: string) => {
-    try {
-      const response = await fetch(`${API_BASE}/api/open-vscode-diff`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          compareType,
-          relativePath,
-          variantLabel,
-          mappedPath,
-        }),
-      });
-      const data = await response.json();
-      if (!data.ok) {
-        console.error('Failed to get file paths:', data.error);
-        return;
-      }
-      
-      const { baseFilePath, variantFilePath } = data;
-      
-      if (action === 'vscode-together') {
-        // Open both files in the same VS Code window
-        if (baseFilePath && variantFilePath) {
-          window.open(`vscode://file${baseFilePath}?windowId=_blank`, '_blank');
-          setTimeout(() => {
-            window.open(`vscode://file${variantFilePath}`, '_blank');
-          }, 500);
-        } else if (baseFilePath) {
-          window.open(`vscode://file${baseFilePath}?windowId=_blank`, '_blank');
-        } else if (variantFilePath) {
-          window.open(`vscode://file${variantFilePath}?windowId=_blank`, '_blank');
-        }
-      } else if (action === 'vscode-separately') {
-        // Open each file in its own new VS Code window
-        if (baseFilePath) {
-          window.open(`vscode://file${baseFilePath}?windowId=_blank`, '_blank');
-        }
-        if (variantFilePath) {
-          setTimeout(() => {
-            window.open(`vscode://file${variantFilePath}?windowId=_blank`, '_blank');
-          }, 300);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to open in VS Code:', error);
-    }
-  }, [compareType]);
+  const handleReviewCommentChange = useCallback((relativePath: string, variantLabel: string, comment: string) => {
+    setReviewComments((prev) => ({ ...prev, [getReviewKey(relativePath, variantLabel)]: comment }));
+    setReviewComment({ exerciseName, filePath: relativePath, variantLabel, compareType, comment });
+  }, [getReviewKey, exerciseName, compareType]);
 
-  // Reset variant index when comparison data changes
+  // Reset variant index and editor when switching what is compared; the loading state hides the old exercise's files
   useEffect(() => {
     setActiveVariantIndex(0);
-  }, [comparison]);
+    setEditing(null);
+    shownCompareType.current = null;
+  }, [compareType, activeExerciseIndex]);
 
+  /*  Refreshes after edits keep the current comparison visible instead of showing the loading state  */
   useEffect(() => {
-    // Wait for save to complete before fetching
-    if (isSaving) {
-      console.log('Waiting for save to complete...');
-      return;
-    }
-    
-    const fetchComparison = async () => {
-      console.log('Fetching comparison for exercise index:', activeExerciseIndex);
-      setCompareStatus('loading');
+    let cancelled = false;
+    const runComparison = async () => {
+      if (shownCompareType.current !== compareType)
+        setCompareStatus('loading');
       setCompareError('');
-      
-      // Add a small delay to ensure the save has fully persisted
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
       try {
-        const response = await fetch(`${API_BASE}/api/compare`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ compareType }),
-        });
-        const payload = await response.json();
-        console.log('Comparison response:', payload);
-        if (!response.ok || !payload?.ok) {
-          throw new Error(payload?.error ?? 'Unable to compute comparison');
+        const result = await compare(currentExercise, compareType);
+        if (!cancelled) {
+          shownCompareType.current = compareType;
+          setComparison(result);
+          setCompareStatus('idle');
         }
-        setComparison(payload);
-        setCompareStatus('idle');
       } catch (error) {
         console.error(error);
-        setCompareError(error instanceof Error ? error.message : 'Unknown error');
-        setCompareStatus('error');
+        if (!cancelled) {
+          setCompareError(error instanceof Error ? error.message : 'Unknown error');
+          setCompareStatus('error');
+        }
       }
     };
 
-    fetchComparison();
-  }, [compareType, activeExerciseIndex, isSaving]); // Re-fetch when exercise changes or save completes
+    runComparison();
+    return () => {
+      cancelled = true;
+    };
+  }, [compareType, currentExercise, refreshToken]);
+
+  const setVariantMarkdown = useCallback((variantIndex: number, markdown: string) => {
+    setExercises((prev) => prev.map((ex, idx) => (idx !== activeExerciseIndex ? ex : {
+      ...ex,
+      variants: ex.variants.map((variant, vIdx) => (vIdx === variantIndex ? { ...variant, markdown } : variant)),
+    })));
+  }, [activeExerciseIndex, setExercises]);
+
+  /*  Store edits of a base file and its counterpart in the compared variant (index into variantLabels); an edited
+      file needs to be reviewed again, for all variants if the base changed  */
+  const handleSaveEdit = useCallback(async (fileComp: FileComparison, compareIndex: number, sides: EditedSides) => {
+    const variantLabel = comparison?.variantLabels?.[compareIndex] ?? '';
+    const writes: Array<[ number, string, string | null ]> = [];
+    if (sides.base !== undefined)
+      writes.push([ 0, fileComp.relativePath, sides.base ]);
+    if (sides.variant !== undefined) {
+      const mapping = (currentExercise.fileMappings ?? []).find((m) => m.baseFile === fileComp.relativePath && m.variantLabel === variantLabel);
+      writes.push([ compareIndex + 1, mapping?.variantFile ?? fileComp.relativePath, sides.variant ]);
+    }
+    await Promise.all(writes.map(async ([ variantIndex, path, content ]) => {
+      if (compareType === 'problem')
+        setVariantMarkdown(variantIndex, content ?? '');
+      else if (content === null)
+        await deleteRepoFile(currentExercise, variantIndex, compareType, path);
+      else
+        await writeRepoFile(currentExercise, variantIndex, compareType, path, content);
+    }));
+    const resetLabels = sides.base !== undefined ? comparison?.variantLabels ?? [] : [ variantLabel ];
+    await Promise.all(resetLabels.map((label) => handleReviewStatusChange(fileComp.relativePath, label, 'unchecked')));
+    setEditing(null);
+    setRefreshToken((token) => token + 1);
+  }, [comparison, compareType, currentExercise, handleReviewStatusChange, setVariantMarkdown]);
+
+  const renderEditor = (fileComp: FileComparison, compareIndex: number) => {
+    const variant = fileComp.variants[compareIndex];
+    if (editing?.path !== fileComp.relativePath || editing.compareIndex !== compareIndex || !variant || !comparison)
+      return undefined;
+    return (
+      <Suspense fallback={<p className="text-sm text-muted-foreground">Loading editor...</p>}>
+        <FileEditor
+          fileName={fileComp.relativePath}
+          baseLabel={comparison.baseVariant}
+          variantLabel={variant.variant}
+          baseContent={fileComp.baseExists ? fileComp.baseContent : null}
+          variantContent={variant.exists ? variant.content : null}
+          allowCreateDelete={compareType !== 'problem'}
+          onSave={(sides) => handleSaveEdit(fileComp, compareIndex, sides)}
+          onCancel={() => setEditing(null)}
+        />
+      </Suspense>
+    );
+  };
+
+  /*  Editing happens in the pairwise view of the chosen variant  */
+  const editInPairwiseView = (path: string, compareIndex: number) => {
+    setViewMode('pairwise');
+    setActiveVariantIndex(compareIndex);
+    setEditing({ path, compareIndex });
+  };
 
   const renderConfigSummary = () => {
-    if (!exerciseName || !targetFolder) {
+    if (!exerciseName) {
       return <p className="text-sm text-red-600">Could not load config. Make sure you saved links first.</p>;
     }
 
@@ -630,8 +862,8 @@ function ComparePage() {
             <p className="font-medium">{exerciseName}</p>
           </div>
           <div>
-            <p className="text-muted-foreground">Target folder</p>
-            <p className="font-mono text-xs">{targetFolder}</p>
+            <p className="text-muted-foreground">Variants</p>
+            <p className="font-medium">{currentExercise.variants.map((v) => v.label).join(', ')}</p>
           </div>
         </CardContent>
       </Card>
@@ -662,14 +894,30 @@ function ComparePage() {
         return null;
       }
       
+      if (viewMode === 'all')
+        return (
+          <AllVariantsComparison
+            fileComparisons={comparison.fileComparisons}
+            baseVariant={comparison.baseVariant}
+            fileMappings={currentExercise.fileMappings || []}
+            showFilter={showFilter}
+            statusOf={(path, label) => reviewStatuses[getReviewKey(path, label)] || 'unchecked'}
+            onReviewStatusChange={handleReviewStatusChange}
+            commentOf={(path, label) => reviewComments[getReviewKey(path, label)] ?? ''}
+            onCommentChange={handleReviewCommentChange}
+            onEdit={editInPairwiseView}
+          />
+        );
+
       const totalVariants = comparison.variantLabels.length;
       const canSwitchVariant = totalVariants > 1;
       const currentVariantLabel = comparison.variantLabels[activeVariantIndex] || '';
 
-      // Filter to only show files where the current variant has actual differences
+      // Filter to only show files where the current variant has actual differences (and the file being edited)
+      const isEditing = (fileComp: FileComparison) => editing?.path === fileComp.relativePath && editing.compareIndex === activeVariantIndex;
       const filesWithDifferencesForVariant = comparison.fileComparisons.filter((fileComp) => {
         const variant = fileComp.variants[activeVariantIndex];
-        return variant?.hasDifference === true;
+        return variant?.hasDifference === true || isEditing(fileComp);
       });
 
       if (filesWithDifferencesForVariant.length === 0) {
@@ -728,7 +976,7 @@ function ComparePage() {
           <div className="space-y-6">
             {filesWithDifferencesForVariant
               .filter((fileComp) => {
-                if (showFilter === 'all') return true;
+                if (showFilter === 'all' || isEditing(fileComp)) return true;
                 const reviewKey = getReviewKey(fileComp.relativePath, currentVariantLabel);
                 const status = reviewStatuses[reviewKey] || 'unchecked';
                 if (showFilter === 'needs-attention') return status === 'needs-attention';
@@ -748,14 +996,16 @@ function ComparePage() {
                   fileMappings={currentExercise.fileMappings || []}
                   reviewStatus={reviewStatus}
                   onReviewStatusChange={(status) => handleReviewStatusChange(fileComp.relativePath, currentVariantLabel, status)}
-                  compareType={compareType}
-                  onOpenExternal={handleOpenExternal}
+                  reviewComment={reviewComments[reviewKey] ?? ''}
+                  onReviewCommentChange={(comment) => handleReviewCommentChange(fileComp.relativePath, currentVariantLabel, comment)}
+                  onEdit={() => setEditing({ path: fileComp.relativePath, compareIndex: activeVariantIndex })}
+                  editor={renderEditor(fileComp, activeVariantIndex)}
                 />
               );
             })}
             {/* Show message when filter returns no results */}
             {filesWithDifferencesForVariant.filter((fileComp) => {
-              if (showFilter === 'all') return true;
+              if (showFilter === 'all' || isEditing(fileComp)) return true;
               const reviewKey = getReviewKey(fileComp.relativePath, currentVariantLabel);
               const status = reviewStatuses[reviewKey] || 'unchecked';
               if (showFilter === 'needs-attention') return status === 'needs-attention';
@@ -801,6 +1051,14 @@ function ComparePage() {
 
       {renderConfigSummary()}
 
+      <PendingChangesPanel
+        exercise={currentExercise}
+        refreshToken={refreshToken}
+        onWritten={() => setRefreshToken((token) => token + 1)}
+        onProblemStatement={setVariantMarkdown}
+        onToast={addToast}
+      />
+
       <Card>
         <CardHeader>
           <CardTitle>Comparison scope</CardTitle>
@@ -822,7 +1080,25 @@ function ComparePage() {
               </button>
             ))}
           </div>
-          
+
+          {/* View mode: one variant vs. base, or all variants side by side */}
+          <div className="flex items-center gap-2 pt-2 border-t">
+            <span className="text-sm text-muted-foreground">View:</span>
+            {([ [ 'pairwise', 'One variant' ], [ 'all', 'All variants' ] ] as const).map(([ mode, label ]) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                  viewMode === mode
+                    ? 'bg-slate-700 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {/* Review status filter */}
           <div className="flex items-center gap-2 pt-2 border-t">
             <span className="text-sm text-muted-foreground">Show:</span>

@@ -12,6 +12,7 @@ export type ConfirmDialogProps = {
   confirmText?: string;
   cancelText?: string;
   variant?: 'default' | 'destructive';
+  confirmDisabled?: boolean;
 };
 
 export function ConfirmDialog({
@@ -24,6 +25,7 @@ export function ConfirmDialog({
   confirmText = 'Confirm',
   cancelText = 'Cancel',
   variant = 'default',
+  confirmDisabled = false,
 }: ConfirmDialogProps) {
   if (!isOpen) return null;
 
@@ -54,7 +56,7 @@ export function ConfirmDialog({
               <Button variant="outline" onClick={onClose}>
                 {cancelText}
               </Button>
-              <Button variant={variant} onClick={handleConfirm}>
+              <Button variant={variant} onClick={handleConfirm} disabled={confirmDisabled}>
                 {confirmText}
               </Button>
             </div>
